@@ -7,7 +7,9 @@ pub mod model;
 pub mod one_library;
 pub mod paths;
 pub mod plan;
+pub mod publish;
 pub mod read;
+pub mod verify;
 
 pub use model::{
     LibraryKind, StickAlbum, StickCue, StickDevice, StickHistory, StickMenu, StickModel, StickMyTag, StickName, StickPlaylist,

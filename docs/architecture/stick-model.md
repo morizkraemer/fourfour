@@ -88,7 +88,7 @@ emit::write_fresh(root, &FreshExport { model: &model, files })?;     // the gene
 - `convert::model_from_tracks` is the one place that turns the old writer inputs (`Track`, `AnalysisResult`, `Playlist`) into a model. It keeps the header values the old writer proved on a CDJ-3000.
 - The creation date comes from the caller (`StickDevice.created_date`), so the same input gives the same `export.pdb` bytes.
 
-Not done yet: staged publish and recovery. See the plan.
+The fresh-export functions above write straight to the target folder; the incremental sync below stages its writes.
 
 ## Incremental sync (`plan.rs`)
 
@@ -118,12 +118,36 @@ Rules for our own tracks:
 - Names are compared exactly, in the databases and in the diff, so two spellings of an artist are two artists and nothing "updates" forever (issue #42).
 - Paths are made safe in one place (`paths.rs`): trailing dots and spaces are cut from every folder and file name, `? : * " < > | \` and control characters become `_`, Windows device names get a `_` in front, names are cut to 255 UTF-16 units keeping the extension, and two paths that differ only in letter case get ` (2)`, ` (3)` on the file name. The artist tag itself is not changed.
 - Removing: only our audio file, our `ANLZ0000.DAT/.EXT/.2EX` and our cover files; folders only when empty. Artist, album, genre and label rows go only when our removed tracks were their last users.
-- Order of writes: new files, then both databases, then deletions. There is no staging yet: a pulled stick can still leave a half-written database (slice 6).
+- Writes are staged and published through a journal, see "Safe writes" below.
 - The creation date of a stick is kept once set, and a track keeps its added date, so the databases do not change from day to day.
 
 Decision taken here, for Merlin to confirm: on a stick whose OneLibrary Rekordbox left empty, v2 fills OneLibrary with all tracks rather than only ours, so both databases always show the same stick.
 
 Tests: `pioneer-usb-writer/tests/stick_plan.rs` (12), `pioneer-library/tests/stick_sync_v2.rs` (3: fresh, takeover of an old-sync stick, Rekordbox-like stick), unit tests in `paths.rs`. Local with the real stick copy: adding 3 tracks gives 1267 in both databases, all 1264 foreign rows byte-identical, a second plan is a no-op.
+
+## Safe writes (`publish.rs`, `verify.rs`)
+
+`plan::apply` never writes a database in place. The steps:
+
+1. **Stage.** Every new or changed file (audio, analysis, covers, `export.pdb`, `exportExt.pdb`, `exportLibrary.db`) is written under `<stick>/.fourfour-staging/`, at the path it will have later.
+2. **Check.** `verify::check_model` (unique ids, no folder loops, playlists only list tracks that exist, every artist/album/genre/key/cover id resolves), `verify::check_written` (the staged databases are read back and must hold what was planned, and agree with each other) and `verify::check_files` (each of our tracks has its audio with the right size and an analysis file in the folder that belongs to its path, naming that path). Any problem: the staging folder is removed, the error says "Nothing was changed", the stick is as before.
+3. **Journal.** `<stick>/.fourfour-publish.json` lists the files to move in and the files to delete. Written to a temp name, synced, renamed. This is the point of no return.
+4. **Publish.** Each staged file is moved into place; the file it replaces and every deleted file go to `<stick>/.fourfour-previous/` first.
+5. **Finish.** The journal is removed, then the two helper folders, then folders left empty.
+
+After a pulled stick, `publish::recover(root)` puts things right: with no journal the staging is thrown away (the old stick is intact), with a journal the publish is finished (the new stick). Never a mix. `LocalLibrary::sync_usb_v2` calls it first; `apply` refuses to start while leftovers exist, so call `recover` before `Stick::read` and `plan`. `publish::pending(root)` tells a UI that a repair is due.
+
+`verify::verify_stick(root, &owned.paths)` runs the same checks on a stick as it is and returns a list of problems (empty = fine). It is the base for a "Verify" action.
+
+Limits, to be honest about them:
+
+- The kill test stops the sync between steps (before the journal, before each move and delete, before removing the journal, before clean-up) and checks that recovery gives exactly the old or the new stick. It does not simulate a file half written by the operating system or a FAT directory entry lost in a power cut; sync calls are made but untested on a real stick.
+- Staging needs room for the new files next to the old ones while a sync runs: new audio, the databases twice, changed analysis files. The free-space check in `multi_sync` does not count this yet.
+- There is no roll-back after the journal is written; the checks run before it.
+- A stick that Rekordbox or a player changed between staging and recovery is not detected (rbxport handles that case; we do not yet).
+- If the stick is pulled after the journal is removed but before clean-up, a folder emptied by the sync can stay behind.
+
+Tests: `pioneer-usb-writer/tests/stick_publish.rs` (6): killed at every step (about 20 points) ends old or new and the next sync completes; staging without journal is discarded; no new sync over an interrupted one; a missing source file or a failed check changes nothing; `verify_stick` finds missing audio and a wrong analysis file.
 
 ## Ratings, colours and My Tags
 

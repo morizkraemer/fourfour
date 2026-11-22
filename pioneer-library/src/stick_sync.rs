@@ -59,6 +59,8 @@ impl LocalLibrary {
             .collect();
         let wanted = Wanted { tracks: &tracks, analyses: &analyses, playlists: &playlists, labels: &labels };
 
+        pioneer_usb_writer::stick::publish::recover(output_dir)
+            .with_context(|| format!("Cannot repair the interrupted sync on {}", output_dir.display()))?;
         let stick = Stick::read(output_dir).with_context(|| format!("Cannot read the library on {}", output_dir.display()))?;
         let manifest = sticks::read_manifest(output_dir)?;
         let owned = ownership_on(&stick, manifest.as_ref());

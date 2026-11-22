@@ -10,7 +10,7 @@ use super::dump::fnv64;
 use super::emit::{self, AnalysisSource, ArtworkSource, AudioSource, FreshExport, TrackFiles};
 use super::model::{StickCue, StickDevice, StickModel, StickName, StickPlaylist, StickTrack};
 use super::read::Stick;
-use super::{convert, paths};
+use super::{convert, paths, publish, verify};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Ownership {
@@ -395,42 +395,39 @@ pub fn plan(existing: &Stick, wanted: Wanted, owned: &Ownership, device: StickDe
     Ok(StickPlan { model, tracks: planned, removed, obsolete_artwork, foreign_track_count, ownership, writes_databases })
 }
 
-fn remove_file_and_empty_parent(path: &Path) {
-    let _ = std::fs::remove_file(path);
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::remove_dir(parent);
-    }
-}
-
-fn remove_our_files(root: &Path, plan: &StickPlan) {
-    let on_stick = |path: &str| root.join(path.trim_start_matches('/'));
+fn files_to_remove(plan: &StickPlan) -> Vec<String> {
+    let relative = |path: &str| path.trim_start_matches('/').to_owned();
     let audio_in_use: BTreeSet<String> = plan.model.tracks.iter().map(|track| paths::fold(&track.path)).collect();
     let analysis_in_use: BTreeSet<&str> = plan.model.tracks.iter().map(|track| track.analyze_path.as_str()).collect();
+    let mut files = Vec::new();
     for row in &plan.removed {
         if !audio_in_use.contains(&paths::fold(&row.path)) {
-            remove_file_and_empty_parent(&on_stick(&row.path));
+            files.push(relative(&row.path));
         }
         if !row.analyze_path.is_empty() && !analysis_in_use.contains(row.analyze_path.as_str()) {
-            let dat = on_stick(&row.analyze_path);
-            for extension in emit::ANALYSIS_EXTENSIONS {
-                let _ = std::fs::remove_file(dat.with_extension(extension));
-            }
-            if let Some(dir) = dat.parent() {
-                let _ = std::fs::remove_dir(dir);
-                if let Some(shard) = dir.parent() {
-                    let _ = std::fs::remove_dir(shard);
-                }
-            }
+            let dat = Path::new(row.analyze_path.trim_start_matches('/'));
+            files.extend(
+                emit::ANALYSIS_EXTENSIONS.iter().map(|extension| dat.with_extension(extension).to_string_lossy().into_owned()),
+            );
         }
     }
     for small in &plan.obsolete_artwork {
-        for variant in emit::artwork_variants(small) {
-            let _ = std::fs::remove_file(on_stick(&variant));
-        }
+        files.extend(emit::artwork_variants(small).iter().map(|variant| relative(variant)));
     }
+    files.extend(["PIONEER/rekordbox/exportLibrary.db-wal".to_owned(), "PIONEER/rekordbox/exportLibrary.db-shm".to_owned()]);
+    files
 }
 
 pub fn apply(root: &Path, plan: &StickPlan, wanted: Wanted) -> Result<SyncReport> {
+    apply_with(root, plan, wanted, &mut |_| Ok(()))
+}
+
+pub fn apply_with(
+    root: &Path,
+    plan: &StickPlan,
+    wanted: Wanted,
+    checkpoint: &mut dyn FnMut(&publish::Step) -> Result<()>,
+) -> Result<SyncReport> {
     let report = plan.report();
     if plan.is_noop() {
         return Ok(report);
@@ -450,8 +447,22 @@ pub fn apply(root: &Path, plan: &StickPlan, wanted: Wanted) -> Result<SyncReport
             }
         })
         .collect();
-    emit::write_fresh(root, &FreshExport { model: &plan.model, files })
-        .with_context(|| format!("Cannot write the library on {}", root.display()))?;
-    remove_our_files(root, plan);
+
+    let stage = publish::begin(root)?;
+    let staged = emit::write_fresh(&stage, &FreshExport { model: &plan.model, files })
+        .with_context(|| format!("Cannot prepare the library for {}", root.display()))
+        .and_then(|()| {
+            let mut problems = verify::check_model(&plan.model);
+            problems.extend(verify::check_written(&stage, &plan.model)?);
+            problems.extend(verify::check_files(&plan.model, &[&stage, root], &plan.ownership.paths));
+            anyhow::ensure!(problems.is_empty(), "The new library did not pass its check: {}", verify::describe(&problems));
+            Ok(())
+        });
+    if let Err(error) = staged {
+        publish::abandon(root)?;
+        return Err(error.context(format!("Nothing was changed on {}", root.display())));
+    }
+    publish::commit(root, files_to_remove(plan), checkpoint)
+        .with_context(|| format!("Cannot finish writing {}", root.display()))?;
     Ok(report)
 }
