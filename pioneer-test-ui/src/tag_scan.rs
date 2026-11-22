@@ -214,13 +214,7 @@ fn advise_random_access(file: &File) {
     unsafe { libc::posix_fadvise(file.as_raw_fd(), 0, 0, libc::POSIX_FADV_RANDOM) };
 }
 
-#[cfg(target_os = "macos")]
-fn advise_random_access(file: &File) {
-    use std::os::fd::AsRawFd;
-    unsafe { libc::fcntl(file.as_raw_fd(), libc::F_RDAHEAD, 0) };
-}
-
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+#[cfg(not(target_os = "linux"))]
 fn advise_random_access(_file: &File) {}
 
 pub fn read_track_tags(path: &Path, id: u32) -> Result<Track> {
