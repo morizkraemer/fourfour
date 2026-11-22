@@ -60,9 +60,23 @@ Where data lives (keyed on the bundle id through Tauri's `app_data_dir`):
 - `~/Library/Application Support/<id>/`: `library.db` (`pioneer-test-ui/src/main.rs:1318`), `config.json` (`:1311`), `ui.json` (`backup_commands.rs:16`), `waveform-detail/` cache (`main.rs:887`), `Backups/` safety copies (`backup_commands.rs:19,175`), analysis failure memo and analysis order side file (`main.rs:309-313`, Waiting 32), optional `models/`.
 - The webview's localStorage lives under `~/Library/WebKit/<id>/` (WKWebView default; not verified on a Mac). UI preferences held there are lost on an id change.
 - Not keyed on the id: the CoreML compiled-model cache `~/Library/Caches/fourfour-coreml/` (`fourfour-analysis-rs/src/ort_beat.rs:74`). A custom library path is stored as an absolute path in `config.json` (`main.rs:1357-1365`) and survives.
-- Merlin's installed copy is under the old id. Changing the id makes the new build start with an empty library; the old folder is not deleted.
+- Merlin's installed copy is under the old id. Without the migration, changing the id would start the new build with an empty library.
 
-Next step: on first start of the new id, if the old folder exists and the new one does not, copy (not move) `library.db`, `config.json`, `ui.json`, `waveform-detail/`; show one notice; leave the old folder. Test with a library at the current schema (`pioneer-library/src/lib.rs` migrations; v8 on `parked-all-v7`, v7 on `ov-1028`).
+Built on branch `drain/Q24-20261121` (not landed): `pioneer-test-ui/src/data_migration.rs`, called first thing in `main()`, before the log opens.
+- Placeholder id: `app.ffdj.library` in `pioneer-test-ui/tauri.conf.json:3`. The old id is the constant `LEGACY_IDENTIFIER` in `data_migration.rs`.
+- Folders handled (old id to new id, each on its own): macOS `~/Library/Application Support`, `Caches`, `Logs`, `WebKit`; Windows `%APPDATA%` and `%LOCALAPPDATA%`; Linux `$XDG_DATA_HOME`, `$XDG_CONFIG_HOME`, `$XDG_CACHE_HOME` (logs sit inside the data folder there).
+- A folder moves only if the old one has files and the new one is missing or empty. Same volume: one rename. Otherwise: copy to `<new>.migrating`, compare every file byte for byte, then rename into place. The old folder is never deleted after a copy.
+- The marker file `.fourfour-migrated-from` in the new folder stops a second run, even if the old folder is still there.
+- A failure leaves the old folder as it was, removes the half copy, and logs one error line (`fourfour.log` in the new log folder); the app starts with an empty library.
+- Library key: none to migrate. The app library `library.db` is plain SQLite (no `PRAGMA key`, no keychain use). The only SQLCipher keys are Pioneer's fixed ones for `exportLibrary.db` and Rekordbox `master.db`, constants in the code and independent of the id.
+- Not handled: `~/Library/Preferences`, `HTTPStorages` and `Saved Application State` for the old id (no app data in them as far as the code shows).
+
+Changing the placeholder to the final id:
+1. Edit `identifier` in `pioneer-test-ui/tauri.conf.json:3`. Nothing else in the Rust code needs a change; the three scripts (`scripts/mac/night3.sh`, `scripts/mac/perf-night.sh`, `scripts/soak-real.sh`) read it from that file (the Mac scripts prefer the built app's `CFBundleIdentifier`).
+2. If a build with the placeholder id was ever used for real data, add it as a second legacy id in `data_migration.rs` (today only `com.pioneer.test-ui` is migrated).
+3. Update the old id in the docs that quote paths: `docs/analysis/app-integration-2026-10.md`, the log paths quoted in this file.
+
+Still open, needs the Mac: with the old `com.pioneer.test-ui` data present (library, `config.json`, `ui.json`, `waveform-detail/`, `Backups/`), start the new build once and check (1) the library opens with all tracks, playlists and analysis, and the debug log says the data was moved; (2) `~/Library/Application Support/<new id>/` has the files and the marker, the old folder is gone after a rename (or still there after a copy); (3) the custom library path in `config.json` still works; (4) the second start does nothing; (5) the Settings UI preferences held in `~/Library/WebKit/<id>/` carried over (not verified that WKWebView keeps them there); (6) the installed old app is not launched in between. Test on a copy of the data first: the migration moves the real folder.
 
 ## 3. Signing, notarization, hardened runtime - needs Merlin (account), then agent
 

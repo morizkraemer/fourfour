@@ -28,6 +28,11 @@ done
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 TARGET="${CARGO_TARGET_DIR:-$ROOT/target}"
+CONFIG_APP_ID="$(sed -n 's/.*"identifier": *"\([^"]*\)".*/\1/p' "$ROOT/pioneer-test-ui/tauri.conf.json" | head -n 1)"
+[ -n "$CONFIG_APP_ID" ] || { echo "no identifier in $ROOT/pioneer-test-ui/tauri.conf.json" >&2; exit 1; }
+app_id() {
+  /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist" 2> /dev/null || echo "$CONFIG_APP_ID"
+}
 OUT="${FF_PERF_NIGHT_OUT:-$ROOT/build/mac/perf-$(date +%Y-%m-%d-%H%M)}"
 mkdir -p "$OUT"
 say() { echo "[perf-night] $*" | tee -a "$OUT/night.log" >&2; }
@@ -80,7 +85,7 @@ wait_mark() {
 app_run() {
   local n="$1" probe="$2" home="$OUT/home-$1"
   shift 2
-  local data="$home/Library/Application Support/com.pioneer.test-ui"
+  local data="$home/Library/Application Support/$(app_id)"
   rm -rf "$home"
   local need_kb free_kb
   need_kb=$(( $(du -sk "$FIXTURE/library" | cut -f1) * 2 ))

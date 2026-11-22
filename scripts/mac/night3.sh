@@ -57,6 +57,13 @@ HOST="${MAC_HOST:-mbp}"
 REAL_HOME="$HOME"
 LABELS="ov-1028 r110-first-result r98-mac-pair"
 MIN_FREE_GB="${NIGHT3_MIN_FREE_GB:-35}"
+LEGACY_APP_ID="com.pioneer.test-ui"
+CONFIG_APP_ID="$(sed -n 's/.*"identifier": *"\([^"]*\)".*/\1/p' "$ROOT/pioneer-test-ui/tauri.conf.json" | head -n 1)"
+[ -n "$CONFIG_APP_ID" ] || { echo "no identifier in $ROOT/pioneer-test-ui/tauri.conf.json" >&2; exit 1; }
+
+app_id() {
+  /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist" 2> /dev/null || echo "$CONFIG_APP_ID"
+}
 
 say() {
   echo "[night3] $*" >&2
@@ -221,7 +228,7 @@ scratch_home_check() {
 }
 
 library_check() {
-  local home="$1" config="$1/Library/Application Support/com.pioneer.test-ui/config.json" lib
+  local home="$1" config="$1/Library/Application Support/$(app_id)/config.json" lib
   if [ "$DRY" = 1 ]; then
     say "library path check: config.json library_path must be inside $home"
     return 0
@@ -239,7 +246,8 @@ library_check() {
 PROTECTED_DIRS=(
   "$REAL_HOME/Library/Application Support/Pioneer"
   "$REAL_HOME/Library/Pioneer"
-  "$REAL_HOME/Library/Application Support/com.pioneer.test-ui"
+  "$REAL_HOME/Library/Application Support/$LEGACY_APP_ID"
+  "$REAL_HOME/Library/Application Support/$CONFIG_APP_ID"
   "$REAL_HOME/Library/Application Support/rekordbox"
   "$REAL_HOME/Library/Application Support/rekordbox6"
 )
@@ -372,7 +380,7 @@ app_bin() {
 
 launch_app() {
   local name="$1" probe="$2" home="$NIGHT/home-$1" log="$NIGHT/app/$1.jsonl" data bin
-  data="$home/Library/Application Support/com.pioneer.test-ui"
+  data="$home/Library/Application Support/$(app_id)"
   scratch_home_make "$home"
   run mkdir -p "$data" "$NIGHT/app"
   run cp -R "$FIX/library" "$home/fixture-library"
