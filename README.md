@@ -14,8 +14,9 @@ features, no rekordbox needed.
 Early alpha, macOS first. Builds are unsigned and only shared as drafts.
 
 - **Library and player:** folder scan, playlists and folders, waveform player with
-  beat grid and hot cues, inspector, duplicate cleanup, moved-file reconnect,
-  playlist export (M3U8, CSV, Traktor NML, rekordbox XML).
+  beat grid and hot cues, inspector. Duplicate cleanup, moved-file reconnect and
+  playlist export (M3U8, CSV, Traktor NML, rekordbox XML) are on the `rc` branch,
+  in the next build.
 - **Analysis:** fully local, in Rust (Beat This! ONNX model for beats and
   downbeats, own key model). On 698 Beatport previews, scored on the same tracks
   against Beatport's labels: key 58% exact vs rekordbox 51% on the held-out
