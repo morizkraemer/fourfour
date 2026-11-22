@@ -828,3 +828,4 @@
 2026-11-21 11:30 orchestrator xplat: CI run 44896526770 green on linux, windows (nsis + self-check), macos (dmg + check-dmg), notices; webkit smoke flaky (allowed to fail); tempo limit set to 8 cents (Windows measured 6.57), needs Merlin's OK [branch xplat 0602d6c, PR 40]
 2026-11-22 01:25 orchestrator xplat: Merlin OK'd 8 cent tempo limit; Merlin has a USB stick + SD card on the Mac for tests
 2026-11-22 01:29 orchestrator usb-hw: backup of DJ stick MK_BLACK + SD card INTENSO started on the Mac (~/Backups/usb-2026-11-22, low priority); seat worker (opus) spawned for headless export check: stick read-only, SD card writable next to DCIM, cleanup after
+2026-11-22 02:04 orchestrator decided: Merlin: fourfour goes GPL (not for sale, fully open source); Mo must agree. Spawned rbx-lift (seat, opus): rbxport crate liftability + GPLv3 audit of our deps. USB backup verified (MK_BLACK 7546 files/26.1 GB, INTENSO 224/1.46 GB), usb-hw worker resumed

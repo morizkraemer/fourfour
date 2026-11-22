@@ -1,0 +1,13 @@
+You are a research worker for fourfour, a Tauri v2 + Svelte 5 + Rust DJ library app. Read AGENTS.md first and docs/research/rbxport-ora-2026-11.md (the 2026-11-20 rbxport deep dive). READ ONLY: change no code; write one doc.
+
+CONTEXT: Merlin decided 2026-11-22 that fourfour goes GPL (not for sale, fully open source). Mo (co-owner, owns the USB/sync lane) still has to agree. With GPL, code from chrisle/rbxport (GPL-2.0-or-later) can legally be reused. We want facts for a decision with Mo.
+
+TASKS
+1. Clone https://github.com/chrisle/rbxport (shallow, latest tag) into ~/dev/build/rbxport (outside the repo). Note the version and what changed since v1.10.0 (release-notes.json).
+2. Liftability of their USB/sync and PRO DJ LINK code into fourfour: for each relevant crate (rbl-pdb, rbl-onelibrary, rbl-anlz, rbl-export, the LINK/NFS/dbserver crates, and whatever does staged sync, verify, recovery, format conversion): what it does, its public API and input types, its dependencies on other rbl crates and on their app/master.db model, whether it is published on crates.io, size (LOC), test coverage, and how hard it would be to feed it from our library (pioneer-library's library.db model) instead of a Rekordbox master.db. Try `cargo check` / `cargo test` of the export crates alone in their clone (CARGO_TARGET_DIR=~/.cache/rbx-lift-target, never /tmp; delete at the end; nice 10).
+3. Compare with Mo's current writer (pioneer-usb-writer and the sync engine) per feature: what each has, what ours has that theirs lacks (e.g. CDJ-3000 hardware proof), and the realistic options: (a) depend on their crates as a git dependency, (b) vendor/fork the crates, (c) port pieces into Mo's writer, (d) keep ours and use their docs only. Effort and risk for each.
+4. GPLv3 compatibility audit of fourfour's own dependencies: `cargo metadata` licences for the whole workspace plus app/package.json deps, the bundled models (Beat This! weights, key model) and Signalsmith Stretch. Flag anything not compatible with GPL-3.0-or-later (e.g. GPL-2.0-only, proprietary, CC-NC). Recommend the exact licence (GPL-3.0-or-later vs GPL-2.0-or-later) with reasons.
+
+DELIVER: docs/research/rbx-lift-2026-11-22.md on your branch, max ~150 lines, plain hyphens only, no en/em dashes; mark anything unverified. Commit "docs(research): rbxport liftability and GPL audit" ending with "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>". No push, no merge, no other files, no new dependencies, no Mac access.
+
+REPORT: RESULT: head SHA, rbxport version, per-option effort/risk table summary, recommendation, GPL audit verdict (blockers listed). Or BLOCKED.
