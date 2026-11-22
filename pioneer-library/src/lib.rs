@@ -57,7 +57,8 @@ pub struct BeatPosition {
 
 pub use multi_sync::{
     NoProgress, PlanTrack, PreparedMultiSync, ProgressSink, StickProgress, StickReport,
-    StickStatus, SyncPhase, SyncSelection, SyncTarget, UsbSyncPlan, VolumeCapacity, WriterFn,
+    StickStatus, SyncEngine, SyncPhase, SyncSelection, SyncTarget, UsbSyncPlan, VolumeCapacity, WriterFn,
+    SYNC_ENGINE_ENV,
     statvfs_available_bytes, volume_capacity,
 };
 pub use revision::LibraryRevision;

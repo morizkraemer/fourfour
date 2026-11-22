@@ -1,6 +1,6 @@
 # Stick model and reader (writer v2)
 
-**Status:** experiment on branch `writer-v2`. The old writer (`writer/filesystem.rs`, `sync_usb`) is still the default; nothing in the app calls v2 yet. Plan: `docs/plans/writer-v2-2026-11-22.md`.
+**Status:** experiment on branch `writer-v2`. The old writer (`writer/filesystem.rs`, `sync_usb`) is still the default; the app reaches v2 only with `FOURFOUR_SYNC_ENGINE=v2` set. Plan: `docs/plans/writer-v2-2026-11-22.md`.
 
 **Code:** `pioneer-usb-writer/src/stick/`, built on the vendored `vendor/rbl-pdb` and `vendor/rbl-anlz` (from rbxport, GPL; see `NOTICE`).
 
@@ -101,7 +101,7 @@ let planned = plan(&stick, wanted, &owned, device)?;     // reads only; planned.
 let report = apply(root, &planned, wanted)?;             // writes; then store planned.ownership
 ```
 
-`pioneer_library::LocalLibrary::sync_usb_v2(root, name)` does this for the whole library and keeps the ownership in `PIONEER/fourfour-manifest.json` (new optional `v2` field). `multi_sync` still calls the old writer.
+`pioneer_library::LocalLibrary::sync_usb_v2(root, name)` does this for the whole library and keeps the ownership in `PIONEER/fourfour-manifest.json` (new optional `v2` field).
 
 `Ownership` is what fourfour wrote on this stick: track paths, playlist ids, and a fingerprint per track (analysis + cover). Everything else on the stick is **foreign** and is kept:
 
@@ -148,6 +148,28 @@ Limits, to be honest about them:
 - If the stick is pulled after the journal is removed but before clean-up, a folder emptied by the sync can stay behind.
 
 Tests: `pioneer-usb-writer/tests/stick_publish.rs` (6): killed at every step (about 20 points) ends old or new and the next sync completes; staging without journal is discarded; no new sync over an interrupted one; a missing source file or a failed check changes nothing; `verify_stick` finds missing audio and a wrong analysis file.
+
+## The switch in `multi_sync`
+
+The app syncs through `LocalLibrary::prepare_multi_sync(targets)`. That call now picks an engine:
+
+- **Default: the old writer.** Nothing changes for the app, its commands or its events.
+- **`FOURFOUR_SYNC_ENGINE=v2`** in the environment of the app (or `prepare_multi_sync_with(targets, SyncEngine::V2)` in code) runs plan, staging, check and publish from this document for every stick, on the same threads, with the same `UsbSyncPlan`, `StickReport` and progress events.
+
+```bash
+FOURFOUR_SYNC_ENGINE=v2 ./dev.sh        # one run with v2; unset = old writer
+```
+
+What differs with v2 on:
+
+- `plan()` (the dry run) counts foreign tracks from `export.pdb` too, lists removals with their library ids, and reports 0 bytes needed when there is nothing to do.
+- Space: `bytes_needed` = audio to copy + 16 MB + 128 KB per written track + room for the staged databases (their current size + 8 KB per track on the stick). The run refuses with the same "Not enough space" message before anything is staged.
+- An interrupted earlier sync is repaired first (`publish::recover`).
+- Progress: `checking-space`, `copying` (while staging; no per-track count yet, the writer has no callback), `writing-database` with `done` counting audio files as they are put in place, `done`.
+- Ratings and colour labels are read once per prepare and sent along.
+- The manifest gains the `v2` ownership on the first v2 sync. A later sync with the old writer still works on such a stick but drops foreign rows again, as it always did: do not switch back and forth on a stick that carries someone else's library.
+
+Tests: `pioneer-library/tests/multi_sync_v2.rs` (6): default engine, dry run writes nothing and counts staging space, not enough space, run + progress + no-op, playlist selection removes tracks, foreign library kept, two sticks at once with one repaired first.
 
 ## Ratings, colours and My Tags
 

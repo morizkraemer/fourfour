@@ -24,7 +24,7 @@ pub fn ownership_on(stick: &Stick, manifest: Option<&StickManifest>) -> Ownershi
     }
 }
 
-fn record(root: &Path, plan: &StickPlan, library_ids: &[i64], report: &SyncReport) -> Result<()> {
+pub(crate) fn record(root: &Path, plan: &StickPlan, library_ids: &[i64], report: &SyncReport) -> Result<()> {
     let mut manifest = sticks::manifest_or_fresh(root)?;
     manifest.files = plan
         .tracks
