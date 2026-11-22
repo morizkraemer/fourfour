@@ -30,7 +30,8 @@ Checked 2026-11-18: no fourfour post exists yet (20 entries; latest: prunr overh
 ### 3. Others doing the same thing
 - several people are building something similar. we didn't find a nice open source one yet.
 - closest match: ora dj. does all the same things (even in the free tier) and more, and is more polished. but it's closed source, so we keep going.
-- CHECK: rbxport (GitHub, GPL-2.0+, Tauri, same "fewer features than rekordbox" pitch, own analysis, OneLibrary export, ~400 stars) is open source and very close; see docs/research/competitors-2026-11.md. Merlin decides whether and how to mention it.
+- rbxport (Merlin, 2026-11-22): a nice one, open source and fast, almost good already. but it copies rekordbox's clunky ui instead of making it a better, modern experience.
+- honest aside: we probably wouldn't have started when we did if we'd known these existed. but it's also for fun and for personal use, and it's always great to have software you can fully change yourself.
 
 ### 3b. Two brothers, one repo, lots of agents
 - also just a great project for the two of us to build something together.
