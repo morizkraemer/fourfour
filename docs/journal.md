@@ -880,3 +880,5 @@
 2026-11-23 02:56 orchestrator merged rc 932dcc3 (build 2148, all green) into master 5b66095 per Merlin ('merge everything thats already tested to master'); app code = installed build 2148; not pushed. Genre r2 credit runs Q66 (beat features, opus $10) + Q67 (free data, sonnet $10) running
 2026-11-23 03:29 orchestrator pushed master per Merlin ('Push master'): 1272eb6..f324215
 2026-11-23 03:59 orchestrator decided: Merlin via PM: no per-project/day credit cap; one shared $450/month cap in orch-worker; per-run --budget stays; workers on API, seat orchestrates
+2026-11-23 04:18 orch-worker SEC-fourfour cost: $0.3346 (sonnet) — ✅ **Done** - Report written: `~/dev/pm/reviews/2026-11-23-security-fourfour.md` - Counts: critical 0, high 0, medium 2, low 4, info 2. No live secrets found. ⚠️ [branch sec-review-2026-11-23]
+2026-11-23 04:22 orchestrator security fix per Merlin ('do your recs'): untracked + gitignored benchmark corpus manifests and rekordbox-testdata baseline (real track paths); local files kept, history left
