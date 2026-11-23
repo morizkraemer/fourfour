@@ -665,6 +665,9 @@ fn channels_stay_paired_through_underruns() {
     let mut checked = 0usize;
     for _ in 0..3_000 {
         let buf = rig.backend.render_frames(32);
+        if buf.iter().all(|sample| *sample == 0.0) {
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
         for f in buf.chunks(2) {
             if f[0] > 0.05 && f[1] > 0.05 {
                 if f[1] > f[0] {
@@ -841,7 +844,7 @@ fn a_missing_file_is_not_found_and_names_its_path() {
         .play(rig.events(), "/nonexistent/nope.mp3", 0, Some(1_000))
         .unwrap_err();
     assert_eq!(err.kind, ErrorKind::NotFound);
-    assert_eq!(err.message, "Open /nonexistent/nope.mp3: No such file or directory (os error 2)");
+    assert!(err.message.starts_with("Open /nonexistent/nope.mp3: "), "{}", err.message);
     assert_eq!(err.path.as_deref(), Some("/nonexistent/nope.mp3"));
 }
 

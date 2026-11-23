@@ -11,6 +11,7 @@ const TRACKS: i64 = 160;
 const ROUNDS: u64 = 6;
 const CHILD_DIR: &str = "FF_CRASH_CHILD_DIR";
 const CHILD_LOG: &str = "FF_CRASH_CHILD_LOG";
+const CHILD_PACE: Duration = Duration::from_millis(8);
 const FAST: u8 = analysis_stage::WAVEFORM | analysis_stage::KEY;
 
 fn track(index: i64) -> Track {
@@ -116,6 +117,7 @@ fn crash_child() {
     analyse_pending(&lib, |id, pass| {
         writeln!(log, "{id} {pass}").unwrap();
         log.flush().unwrap();
+        std::thread::sleep(CHILD_PACE);
     });
 }
 

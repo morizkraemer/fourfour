@@ -5,7 +5,7 @@ fourfour includes the software listed below. Each component is used under the
 licence shown. Full licence texts are in section 4.
 
 Rust crates linked into the macOS app (target aarch64-apple-darwin, release build with
-the coreml feature, no dev-dependencies, no dev-bins): 403
+the coreml feature, no dev-dependencies, no dev-bins): 404
 
 1. Rust crates by licence
 -------------------------
@@ -308,7 +308,7 @@ BSD-3-Clause AND MIT (1)
 BSD-3-Clause OR MIT (1)
   brotli-decompressor 5.0.0
 
-MIT (73)
+MIT (74)
   aligned-vec 0.6.4
   arg_enum_proc_macro 0.3.4
   av-scenechange 0.14.1
@@ -345,6 +345,7 @@ MIT (73)
   objc2 0.6.4
   objc2-encode 4.1.0
   objc2-foundation 0.3.2
+  openssl-sys 0.9.117
   phf 0.10.1
   phf 0.11.3
   phf 0.8.0
@@ -488,6 +489,12 @@ ONNX Runtime
   Licence: MIT
   Source:  https://github.com/microsoft/onnxruntime
   Note:    Statically linked into the app binary.
+
+OpenSSL
+  Version: 3.x, vendored via openssl-src on Windows builds
+  Licence: Apache-2.0
+  Source:  https://www.openssl.org/
+  Note:    Statically linked into the Windows build for SQLCipher; macOS and Linux builds use the system or bundled libcrypto of the platform.
 
 Signalsmith Linear
   Version: vendored in fourfour-stretch/vendor
@@ -2825,7 +2832,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 ==============================================================================
-Applies to: cfg-if 1.0.4, filetime 0.2.29, socket2 0.6.3, wasm-bindgen 0.2.118, wasm-bindgen-macro 0.2.118, wasm-bindgen-macro-support 0.2.118, wasm-bindgen-shared 0.2.118
+Applies to: cfg-if 1.0.4, filetime 0.2.29, openssl-sys 0.9.117, socket2 0.6.3, wasm-bindgen 0.2.118, wasm-bindgen-macro 0.2.118, wasm-bindgen-macro-support 0.2.118, wasm-bindgen-shared 0.2.118
 ==============================================================================
 
 Copyright (c) 2014 Alex Crichton
@@ -7878,7 +7885,11 @@ Applies to: Key detection model (clean-fsl templates)
 fourfour key detection model: data attribution
 
 The musical key detector ships templates (fourfour-analysis-rs/src/cyankey.rs,
-model "clean-fsl") that were fitted on the Freesound Loop Dataset (FSL10K).
+models "clean-fsl", "clean-fsl-fma" and "clean-fsl-fma-seg", the default) that
+were fitted on the Freesound Loop Dataset (FSL10K). "clean-fsl-fma" and
+"clean-fsl-fma-seg" were also fitted on Free Music Archive clips that carry no
+key labels: the FSL10K model labelled them (whole clips, or 10 s segments for
+"clean-fsl-fma-seg"), and the templates were refitted on both sets.
 
 Dataset
   Antonio Ramires et al. "The Freesound Loop Dataset and Annotation Tool." Proceedings of the
@@ -8021,6 +8032,286 @@ Loops licensed CC0 (public domain dedication) need no credit; their uploaders
 are thanked here in general.
 
 The Krumhansl-Kessler (1982) key profile was used as a regularisation prior.
+
+Free Music Archive (models "clean-fsl-fma" and "clean-fsl-fma-seg")
+  Michael Defferrard, Kirell Benzi, Pierre Vandergheynst, Xavier Bresson.
+  "FMA: A Dataset for Music Analysis." Proceedings of the 18th International
+  Society for Music Information Retrieval Conference (ISMIR), 2017.
+  Metadata and code: https://github.com/mdeff/fma (CC BY 4.0 / MIT).
+
+  2150 30-second clips (fma_large) of Electronic tracks whose artists released
+  them under Creative Commons Attribution (2119: "Attribution" 1705,
+  "Creative Commons Attribution" 335, CC BY 3.0 US 61, CC BY 3.0 18), CC0 (21)
+  or the Public Domain Mark (10), per the track licence in fma_metadata. No
+  audio is distributed with the app; only the fitted numbers are. Each track
+  (id, artist, title, licence, https://freemusicarchive.org/track/<id>) is
+  listed in benchmark/manifests/fma-electronic-cc-unlabelled.json in the
+  source repository. Artists credited for CC BY tracks (number of tracks):
+
+  1000 Names (2)
+  2methylBulbe1ol (1)
+  Airglow (10)
+  Alexander Wendt (1)
+  alexusual (1)
+  Ambienteer (1)
+  Andre Jetson (7)
+  Andrew Pekler (2)
+  Andrew Sacco (14)
+  Anenon (2)
+  Anthony Seeha (1)
+  Antiguo Automata Mexicano (6)
+  Architect 25 (1)
+  Ars Sonor (141)
+  Ars Sonor & Liselotte Frejdig (4)
+  Ars Sonor & M.Nomized (6)
+  Asian Women on the Telephone (2)
+  Assimilation (5)
+  Asura (3)
+  AT (1)
+  Audio K (7)
+  AudioArtist (1)
+  Avaren (10)
+  Barbarix (4)
+  Basic Printer (1)
+  Bela Emerson (1)
+  Benedek (2)
+  Billy Gomberg (1)
+  Bits (1)
+  Black Math (2)
+  Bleeptor (1)
+  BLEO (1)
+  Boris Morozoff (4)
+  BoxCat Games (19)
+  Broke For Free (20)
+  bryface (1)
+  Busdriver (1)
+  C. Scott (17)
+  CardiacTrance (1)
+  Chalk Dinosaur (1)
+  Chris Zabriskie (69)
+  Chronox (4)
+  Civilized (1)
+  Click Click Click (1)
+  Co.fee (1)
+  comounjardin (1)
+  Creo (1)
+  D SMILEZ (5)
+  daiteng (1)
+  David Mumford (6)
+  Decktonic (19)
+  Deiezione HC (5)
+  Deltamorphon (5)
+  Diamond Terrifier (1)
+  Din Sky (1)
+  Dissolved (1)
+  Dj Hollow Life (1)
+  DJ Lengua (1)
+  Doc (1)
+  DoKashiteru (1)
+  DS-10 Dominator (1)
+  DUB DEPT (3)
+  EeL (6)
+  egr (1)
+  el zombi flash (6)
+  Elysian Bailey (3)
+  ENDRUDARK (4)
+  epsilon not (6)
+  Epstein (1)
+  Eric Skiff (10)
+  Evan Schaeffer (18)
+  evgthug1 (1)
+  Ezekiel Honig (1)
+  fasterbaby (1)
+  Fatal Injection (11)
+  Fleslit (23)
+  Gangi (1)
+  GB (1)
+  Gianluca Sgalambro (14)
+  Golden Hits (5)
+  Graham Bole (22)
+  Grimm Reality (1)
+  Gumbel (20)
+  H-LR (3)
+  Hackerblinks (1)
+  Hank (1)
+  HarleyLikesMusic (1)
+  Heinous Bienfäng and His Cheap Moves (1)
+  Hexawe (Various Artists) (1)
+  Hochman & Hopkins (1)
+  Holy Balm (1)
+  Hosomi (1)
+  Hrenopushichka (3)
+  Ieva (1)
+  Imra (1)
+  itchidan (1)
+  Itsensäsyöjät (6)
+  Jalen Warshawsky (3)
+  James Pants (9)
+  Jason Shaw (22)
+  Jason Staczek (8)
+  Jeff Morris (1)
+  Jesse Futerman (3)
+  Jesse Spillane (32)
+  Jeva (6)
+  Jey Row (2)
+  Jim Rooster (20)
+  Johnny Haway (1)
+  Josef Nadek (1)
+  Julian Sartorius (1)
+  Kai Engel (12)
+  KASCHADE (11)
+  Keith Rowe and Seymour Wright (3)
+  Kendall WA & Mitoma (1)
+  Kenneth Kirschner (1)
+  Kevin MacLeod (3)
+  Kidkanevil & DZA (1)
+  Kirk Pearson and Julian Korzeniowsky (1)
+  kloudygirl (1)
+  Krisa (6)
+  Lame Drivers (3)
+  Languis (1)
+  Larry Austin (1)
+  Lawrence Grey (2)
+  Le Capharnaum (1)
+  Learning Music (1)
+  Lee Rosevere (46)
+  Lenkei (1)
+  Little Glass Men (57)
+  little-scale (1)
+  Luciano Foglia (6)
+  MADS (9)
+  Malachi (1)
+  Marco Raaphorst (3)
+  Marihiko Hara (1)
+  Mark Castle (1)
+  Mark Templeton (1)
+  Matsu:Gravas (4)
+  MattyBoJangles (1)
+  mchl nrvs (1)
+  Michett (16)
+  Michett featuring Kalipluche (1)
+  Mike B. Fort (12)
+  milch of source (17)
+  milky-chu (12)
+  MindsEye (3)
+  minusbaby (3)
+  Mise (25)
+  MNSL (3)
+  Monkey Warhol (10)
+  Monroeville Music Center (17)
+  Moon Veil (6)
+  Moonove (6)
+  Multifaros (5)
+  Musetta (1)
+  Music Komite (1)
+  Mystery Mammal (16)
+  Nicola Ratti (1)
+  Nihilore (52)
+  nisei23 (9)
+  Onkyovizion (1)
+  P C III (56)
+  Papa B Blu (13)
+  Parsley Flakes (2)
+  PC-ONE (31)
+  Peter Swimm (1)
+  Phatte Harry (1)
+  Pierlo (16)
+  Pipe Choir (8)
+  Pixelord (1)
+  Portrayal (2)
+  Psychic Powers (1)
+  Pulselooper (1)
+  Quaro (9)
+  Quaro/Bruno Del Ben (1)
+  Quelle Fromage (1)
+  Quiet Music for Tiny Robots (12)
+  Radixxs (1)
+  Raleigh Moncrief (1)
+  Remain (11)
+  Revolution Void (13)
+  Rhinostrich (1)
+  robowist (1)
+  RoccoW (20)
+  Rolemusic (45)
+  ROZKOL (12)
+  Ryan Little (6)
+  Ryoma Maeda & Romantic Suiciders (1)
+  S&ndC&stl& (2)
+  S-B-J (6)
+  Sahy Uhns (1)
+  Sans Nom (1)
+  Sawako (2)
+  sawsquarenoise (14)
+  SBK (1)
+  Seclorance (24)
+  Secret Circuit (2)
+  simon_mathewson (15)
+  Sinqlogue (1)
+  Slackwaves (1)
+  Soulbringer (15)
+  spinningmerkaba (1)
+  staRpauSe (3)
+  statusq (7)
+  Steinbruchel (1)
+  Stellardrone (10)
+  Steve Combs (241)
+  Steve Combs & Delta Is (41)
+  Steve Combs & Simon Mathewson (4)
+  Stickfigure (6)
+  Strategy (1)
+  Subway Sonicbeat (1)
+  Suck Susan (1)
+  Sym (5) & Ars Sonor (6)
+  Synapsis (4)
+  Syntactic (7)
+  Syscrusher (1)
+  T.M.HECTOR (1)
+  Tardiss (11)
+  Telegraphy (3)
+  Telepathic Teddy Bear (9)
+  Tentacles (7)
+  The Birth and Death of Silence (4)
+  The Black Square (■) (6)
+  The Fish Who Saved The Planet (10)
+  The Freeharmonic Orchestra (12)
+  The Green Kingdom (1)
+  The Industrialism (1)
+  The Mugris (24)
+  The One They Fear (4)
+  The String Machine (2)
+  The Tleilaxu Music Machine (2)
+  Thomas Hildebrand (1)
+  Three Chain Links (8)
+  Tim Prebble (1)
+  To Eris (11)
+  Tomasz Bednarczyk (1)
+  Tommy Creep (1)
+  Tours (1)
+  Tri-Tachyon (1)
+  Trillion Catz (5)
+  Tristan Perich (1)
+  Tyler Twombly (6)
+  ui (1)
+  UltraCat (2)
+  un automne à Lob-Nor (1)
+  Uncle Bibby (1)
+  Uncle Milk (19)
+  UncleBibby (23)
+  vargero (1)
+  Vienna Ditto (21)
+  Visager (46)
+  Voodoo Puppets (10)
+  Wake (6)
+  WarpToken (1)
+  Water Sark (12)
+  WMRhapsodies (1)
+  XC3N (1)
+  YELLOW CHAIR (1)
+  Yuichiro Fujimoto (1)
+  Zenial (1)
+  Zimoun (1)
+  смерть в летнюю полночь (7)
+  Чокнутый Пропеллер (16)
 
 ==============================================================================
 Applies to: keyboard-types 0.7.0
@@ -9380,6 +9671,187 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+==============================================================================
+Applies to: OpenSSL
+==============================================================================
+
+                                 Apache License
+                           Version 2.0, January 2004
+                        https://www.apache.org/licenses/
+
+   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+   1. Definitions.
+
+      "License" shall mean the terms and conditions for use, reproduction,
+      and distribution as defined by Sections 1 through 9 of this document.
+
+      "Licensor" shall mean the copyright owner or entity authorized by
+      the copyright owner that is granting the License.
+
+      "Legal Entity" shall mean the union of the acting entity and all
+      other entities that control, are controlled by, or are under common
+      control with that entity. For the purposes of this definition,
+      "control" means (i) the power, direct or indirect, to cause the
+      direction or management of such entity, whether by contract or
+      otherwise, or (ii) ownership of fifty percent (50%) or more of the
+      outstanding shares, or (iii) beneficial ownership of such entity.
+
+      "You" (or "Your") shall mean an individual or Legal Entity
+      exercising permissions granted by this License.
+
+      "Source" form shall mean the preferred form for making modifications,
+      including but not limited to software source code, documentation
+      source, and configuration files.
+
+      "Object" form shall mean any form resulting from mechanical
+      transformation or translation of a Source form, including but
+      not limited to compiled object code, generated documentation,
+      and conversions to other media types.
+
+      "Work" shall mean the work of authorship, whether in Source or
+      Object form, made available under the License, as indicated by a
+      copyright notice that is included in or attached to the work
+      (an example is provided in the Appendix below).
+
+      "Derivative Works" shall mean any work, whether in Source or Object
+      form, that is based on (or derived from) the Work and for which the
+      editorial revisions, annotations, elaborations, or other modifications
+      represent, as a whole, an original work of authorship. For the purposes
+      of this License, Derivative Works shall not include works that remain
+      separable from, or merely link (or bind by name) to the interfaces of,
+      the Work and Derivative Works thereof.
+
+      "Contribution" shall mean any work of authorship, including
+      the original version of the Work and any modifications or additions
+      to that Work or Derivative Works thereof, that is intentionally
+      submitted to Licensor for inclusion in the Work by the copyright owner
+      or by an individual or Legal Entity authorized to submit on behalf of
+      the copyright owner. For the purposes of this definition, "submitted"
+      means any form of electronic, verbal, or written communication sent
+      to the Licensor or its representatives, including but not limited to
+      communication on electronic mailing lists, source code control systems,
+      and issue tracking systems that are managed by, or on behalf of, the
+      Licensor for the purpose of discussing and improving the Work, but
+      excluding communication that is conspicuously marked or otherwise
+      designated in writing by the copyright owner as "Not a Contribution."
+
+      "Contributor" shall mean Licensor and any individual or Legal Entity
+      on behalf of whom a Contribution has been received by Licensor and
+      subsequently incorporated within the Work.
+
+   2. Grant of Copyright License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      copyright license to reproduce, prepare Derivative Works of,
+      publicly display, publicly perform, sublicense, and distribute the
+      Work and such Derivative Works in Source or Object form.
+
+   3. Grant of Patent License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      (except as stated in this section) patent license to make, have made,
+      use, offer to sell, sell, import, and otherwise transfer the Work,
+      where such license applies only to those patent claims licensable
+      by such Contributor that are necessarily infringed by their
+      Contribution(s) alone or by combination of their Contribution(s)
+      with the Work to which such Contribution(s) was submitted. If You
+      institute patent litigation against any entity (including a
+      cross-claim or counterclaim in a lawsuit) alleging that the Work
+      or a Contribution incorporated within the Work constitutes direct
+      or contributory patent infringement, then any patent licenses
+      granted to You under this License for that Work shall terminate
+      as of the date such litigation is filed.
+
+   4. Redistribution. You may reproduce and distribute copies of the
+      Work or Derivative Works thereof in any medium, with or without
+      modifications, and in Source or Object form, provided that You
+      meet the following conditions:
+
+      (a) You must give any other recipients of the Work or
+          Derivative Works a copy of this License; and
+
+      (b) You must cause any modified files to carry prominent notices
+          stating that You changed the files; and
+
+      (c) You must retain, in the Source form of any Derivative Works
+          that You distribute, all copyright, patent, trademark, and
+          attribution notices from the Source form of the Work,
+          excluding those notices that do not pertain to any part of
+          the Derivative Works; and
+
+      (d) If the Work includes a "NOTICE" text file as part of its
+          distribution, then any Derivative Works that You distribute must
+          include a readable copy of the attribution notices contained
+          within such NOTICE file, excluding those notices that do not
+          pertain to any part of the Derivative Works, in at least one
+          of the following places: within a NOTICE text file distributed
+          as part of the Derivative Works; within the Source form or
+          documentation, if provided along with the Derivative Works; or,
+          within a display generated by the Derivative Works, if and
+          wherever such third-party notices normally appear. The contents
+          of the NOTICE file are for informational purposes only and
+          do not modify the License. You may add Your own attribution
+          notices within Derivative Works that You distribute, alongside
+          or as an addendum to the NOTICE text from the Work, provided
+          that such additional attribution notices cannot be construed
+          as modifying the License.
+
+      You may add Your own copyright statement to Your modifications and
+      may provide additional or different license terms and conditions
+      for use, reproduction, or distribution of Your modifications, or
+      for any such Derivative Works as a whole, provided Your use,
+      reproduction, and distribution of the Work otherwise complies with
+      the conditions stated in this License.
+
+   5. Submission of Contributions. Unless You explicitly state otherwise,
+      any Contribution intentionally submitted for inclusion in the Work
+      by You to the Licensor shall be under the terms and conditions of
+      this License, without any additional terms or conditions.
+      Notwithstanding the above, nothing herein shall supersede or modify
+      the terms of any separate license agreement you may have executed
+      with Licensor regarding such Contributions.
+
+   6. Trademarks. This License does not grant permission to use the trade
+      names, trademarks, service marks, or product names of the Licensor,
+      except as required for reasonable and customary use in describing the
+      origin of the Work and reproducing the content of the NOTICE file.
+
+   7. Disclaimer of Warranty. Unless required by applicable law or
+      agreed to in writing, Licensor provides the Work (and each
+      Contributor provides its Contributions) on an "AS IS" BASIS,
+      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+      implied, including, without limitation, any warranties or conditions
+      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
+      PARTICULAR PURPOSE. You are solely responsible for determining the
+      appropriateness of using or redistributing the Work and assume any
+      risks associated with Your exercise of permissions under this License.
+
+   8. Limitation of Liability. In no event and under no legal theory,
+      whether in tort (including negligence), contract, or otherwise,
+      unless required by applicable law (such as deliberate and grossly
+      negligent acts) or agreed to in writing, shall any Contributor be
+      liable to You for damages, including any direct, indirect, special,
+      incidental, or consequential damages of any character arising as a
+      result of this License or out of the use or inability to use the
+      Work (including but not limited to damages for loss of goodwill,
+      work stoppage, computer failure or malfunction, or any and all
+      other commercial damages or losses), even if such Contributor
+      has been advised of the possibility of such damages.
+
+   9. Accepting Warranty or Additional Liability. While redistributing
+      the Work or Derivative Works thereof, You may choose to offer,
+      and charge a fee for, acceptance of support, warranty, indemnity,
+      or other liability obligations and/or rights consistent with this
+      License. However, in accepting such obligations, You may act only
+      on Your own behalf and on Your sole responsibility, not on behalf
+      of any other Contributor, and only if You agree to indemnify,
+      defend, and hold each Contributor harmless for any liability
+      incurred by, or claims asserted against, such Contributor by reason
+      of your accepting any such warranty or additional liability.
+
+   END OF TERMS AND CONDITIONS
 
 ==============================================================================
 Applies to: option-ext 0.2.0

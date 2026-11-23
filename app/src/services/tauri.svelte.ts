@@ -2,6 +2,7 @@ import { invoke, toCommandError, type ErrorKind } from './command-error.ts';
 import { listen } from '@tauri-apps/api/event';
 import { open as dialogOpen, save as dialogSave } from '@tauri-apps/plugin-dialog';
 import { pathBaseName } from '../lib/pathName.ts';
+import { exportFormatInfo, type ExportFormat, type ExportReport } from '../lib/playlistExport.ts';
 import { decodeArtworkBatch } from '../lib/artworkBatch.ts';
 import { unlistenWhenReady } from '../lib/lateUnlisten.ts';
 import {
@@ -264,6 +265,29 @@ export async function pickBackupFile(): Promise<string | null> {
 
 export async function pickBackupDestination(defaultPath: string): Promise<string | null> {
   return (await dialogSave({ defaultPath, filters: [{ name: 'Library backup', extensions: ['gz'] }] })) ?? null;
+}
+
+export async function pickExportDestination(defaultName: string, extension: string, filterName: string): Promise<string | null> {
+  if (useBrowserMocks()) {
+    const path = prompt('Enter mock export path:', defaultName);
+    return path || null;
+  }
+  return (await dialogSave({ defaultPath: defaultName, filters: [{ name: filterName, extensions: [extension] }] })) ?? null;
+}
+
+export async function playlistExportFileName(playlistId: number, format: ExportFormat): Promise<string> {
+  if (useBrowserMocks()) return `Playlist ${new Date().toISOString().slice(0, 10)}.${exportFormatInfo(format).extension}`;
+  return await invoke<string>('playlist_export_file_name', { playlistId, format });
+}
+
+export async function exportPlaylist(playlistId: number, format: ExportFormat, destPath: string): Promise<ExportReport> {
+  if (useBrowserMocks()) return { written: 0, missing: 0, missing_examples: [] };
+  return await invoke<ExportReport>('export_playlist', { playlistId, format, destPath });
+}
+
+export async function playlistTracklist(playlistId: number): Promise<string> {
+  if (useBrowserMocks()) return '';
+  return await invoke<string>('playlist_tracklist', { playlistId });
 }
 
 export interface BackupSizes {
@@ -870,6 +894,7 @@ export async function readUsbState(path: string): Promise<UsbStateResponse | nul
 export interface KeptAsIs {
   playlist_id: number;
   as_of: string;
+  track_ids?: number[];
 }
 
 export interface StickContents {
@@ -886,7 +911,7 @@ export interface VolumeCapacity {
 
 export type SyncSelection =
   | { kind: 'whole_library' }
-  | { kind: 'playlists'; playlist_ids: number[]; track_ids: number[] };
+  | { kind: 'playlists'; playlist_ids: number[]; track_ids: number[]; kept?: { playlist_id: number; track_ids: number[] }[] };
 
 export interface SyncTarget {
   volume: string;
@@ -985,7 +1010,9 @@ function mockWantedTrackIds(selection: SyncSelection): number[] {
   if (selection.kind === 'whole_library') return mockTracks.map((t) => t.id);
   const wanted = new Set(selection.track_ids);
   for (const playlist of mockPlaylists) {
-    if (selection.playlist_ids.includes(playlist.id)) playlist.track_ids.forEach((id) => wanted.add(id));
+    if (!selection.playlist_ids.includes(playlist.id)) continue;
+    const own = selection.kept?.find((k) => k.playlist_id === playlist.id)?.track_ids;
+    (own ?? playlist.track_ids).forEach((id) => wanted.add(id));
   }
   return [...wanted];
 }
@@ -1084,6 +1111,16 @@ export async function getStick(path: string): Promise<StickContents> {
   }
 }
 
+export async function stickTrackPath(path: string, trackId: number): Promise<string | null> {
+  try {
+    return await invoke<string | null>('stick_track_path', { path, trackId });
+  } catch (err) {
+    lastTauriError = `stick_track_path fail: ${String(err)}`;
+    if (!useBrowserMocks()) throw err;
+    return null;
+  }
+}
+
 async function editStick(
   command: string,
   args: Record<string, unknown>,
@@ -1112,16 +1149,41 @@ export function stickAddPlaylists(path: string, playlistIds: number[]) {
 }
 
 export function stickRemovePlaylists(path: string, playlistIds: number[]) {
-  return editStick('stick_remove_playlists', { playlistIds }, path, (s) => dropIds(s.playlist_ids, playlistIds));
+  return editStick('stick_remove_playlists', { playlistIds }, path, (s) => {
+    s.kept_as_is = (s.kept_as_is ?? []).filter((k) => !playlistIds.includes(k.playlist_id));
+    return dropIds(s.playlist_ids, playlistIds);
+  });
 }
 
 export function stickSetKeepUpdated(path: string, playlistId: number, keepUpdated: boolean) {
   return editStick('stick_set_keep_updated', { playlistId, keepUpdated }, path, (s) => {
-    const kept = (s.kept_as_is ?? []).filter((k) => k.playlist_id !== playlistId);
-    if (!keepUpdated) kept.push({ playlist_id: playlistId, as_of: new Date().toISOString() });
-    const changed = kept.length !== (s.kept_as_is ?? []).length ? 1 : 0;
-    s.kept_as_is = kept;
-    return changed;
+    const before = s.kept_as_is ?? [];
+    const already = before.some((k) => k.playlist_id === playlistId);
+    if (keepUpdated === !already) return 0;
+    s.kept_as_is = keepUpdated
+      ? before.filter((k) => k.playlist_id !== playlistId)
+      : [
+          ...before,
+          {
+            playlist_id: playlistId,
+            as_of: new Date().toISOString(),
+            track_ids: [...(mockPlaylists.find((p) => p.id === playlistId)?.track_ids ?? [])],
+          },
+        ];
+    return 1;
+  });
+}
+
+export function stickSetPlaylistTracks(path: string, playlistId: number, trackIds: number[]) {
+  return editStick('stick_set_playlist_tracks', { playlistId, trackIds }, path, (s) => {
+    if (!s.playlist_ids.includes(playlistId)) return 0;
+    const before = s.kept_as_is ?? [];
+    const existing = before.find((k) => k.playlist_id === playlistId);
+    s.kept_as_is = [
+      ...before.filter((k) => k.playlist_id !== playlistId),
+      { playlist_id: playlistId, as_of: existing?.as_of ?? new Date().toISOString(), track_ids: [...trackIds] },
+    ];
+    return 1;
   });
 }
 
@@ -1687,6 +1749,89 @@ export async function relocateMissingInFolder(folder: string): Promise<{ report:
   return invoke('relocate_missing_in_folder', { folder });
 }
 
+export type DuplicateConfidence = 'exact_audio' | 'metadata_only';
+
+export interface DuplicateMember {
+  id: number;
+  artist: string;
+  title: string;
+  path: string;
+  format: string;
+  lossless: boolean;
+  bitrate: number;
+  sample_rate: number;
+  duration_secs: number;
+  file_size: number;
+  playlists: number;
+  cues: number;
+  date_added: string;
+  file_present: boolean;
+}
+
+export interface DuplicateGroup {
+  key: number;
+  confidence: DuplicateConfidence;
+  keeper_id: number;
+  reason: string;
+  members: DuplicateMember[];
+}
+
+export interface MergeRequest {
+  keeper_id: number;
+  remove_ids: number[];
+  require_identical: boolean;
+}
+
+export interface MergeReport {
+  merged: { merge_id: number; keeper_id: number; removed_ids: number[] }[];
+  failed: { keeper_id: number; message: string }[];
+}
+
+export interface ArchivedTrack {
+  id: number;
+  artist: string;
+  title: string;
+  path: string;
+  format: string;
+  lossless: boolean;
+  bitrate: number;
+  file_present: boolean;
+}
+
+export interface ArchivedMerge {
+  merge_id: number;
+  merged_at: string;
+  confidence: string;
+  keeper_id: number;
+  keeper_label: string | null;
+  tracks: ArchivedTrack[];
+}
+
+export interface RestoreOutcome {
+  merge_id: number;
+  restored_ids: number[];
+  keeper_reverted: boolean;
+}
+
+export async function listDuplicateGroups(): Promise<DuplicateGroup[]> {
+  if (useBrowserMocks()) return [];
+  return invoke<DuplicateGroup[]>('list_duplicate_groups');
+}
+
+export async function applyDuplicateMerges(requests: MergeRequest[]): Promise<MergeReport> {
+  if (useBrowserMocks()) return { merged: [], failed: [] };
+  return invoke<MergeReport>('apply_duplicate_merges', { requests });
+}
+
+export async function listDuplicateArchive(): Promise<ArchivedMerge[]> {
+  if (useBrowserMocks()) return [];
+  return invoke<ArchivedMerge[]>('list_duplicate_archive');
+}
+
+export async function restoreDuplicateMerge(mergeId: number): Promise<RestoreOutcome> {
+  return invoke<RestoreOutcome>('restore_duplicate_merge', { mergeId });
+}
+
 export async function locateTrackFile(trackId: number, path: string): Promise<{ relinked: Relinked; health: LibraryHealth }> {
   if (useBrowserMocks()) {
     mockHealth = {
@@ -1697,6 +1842,85 @@ export async function locateTrackFile(trackId: number, path: string): Promise<{ 
     return { relinked: { track_id: trackId, source_path: path }, health: mockHealth };
   }
   return invoke('locate_track_file', { trackId, path });
+}
+
+export type ChoiceReason = 'multiple_candidates' | 'unconfirmed' | 'copy' | 'shared_file';
+
+export interface ReconnectChoice {
+  track_id: number;
+  reason: ChoiceReason;
+  candidates: string[];
+}
+
+export interface ReconnectPlan {
+  reconnect: Relinked[];
+  needs_choice: ReconnectChoice[];
+  still_missing: number[];
+}
+
+export interface RemapPreview {
+  total: number;
+  found: number;
+  still_missing: number;
+}
+
+export interface RemapApplied {
+  relocation_id: number;
+  remapped: Relinked[];
+  still_missing: number;
+}
+
+export interface RemapUndone {
+  reverted: Relinked[];
+  skipped: number;
+}
+
+export interface FolderRelocation {
+  id: number;
+  old_root: string;
+  new_root: string;
+  tracks: number;
+  created_at: string;
+}
+
+export async function findReconnectCandidates(folders: string[]): Promise<ReconnectPlan> {
+  if (useBrowserMocks()) {
+    return { reconnect: mockHealth.missing.map((id) => ({ track_id: id, source_path: `${folders[0]}/track-${id}.mp3` })), needs_choice: [], still_missing: [] };
+  }
+  return invoke('find_reconnect_candidates', { folders });
+}
+
+export async function applyReconnects(picks: { track_id: number; path: string }[]): Promise<{ relinked: Relinked[]; health: LibraryHealth }> {
+  if (useBrowserMocks()) {
+    const ids = picks.map((p) => p.track_id);
+    mockHealth = { ...mockHealth, missing: mockHealth.missing.filter((id) => !ids.includes(id)), relocated: [...mockHealth.relocated, ...ids] };
+    return { relinked: picks.map((p) => ({ track_id: p.track_id, source_path: p.path })), health: mockHealth };
+  }
+  return invoke('apply_reconnects', { picks });
+}
+
+export async function previewRelocateFolder(oldRoot: string, newRoot: string): Promise<RemapPreview> {
+  if (useBrowserMocks()) return { total: mockHealth.missing.length, found: mockHealth.missing.length, still_missing: 0 };
+  return invoke('preview_relocate_folder', { oldRoot, newRoot });
+}
+
+export async function applyRelocateFolder(oldRoot: string, newRoot: string): Promise<{ applied: RemapApplied; health: LibraryHealth }> {
+  if (useBrowserMocks()) {
+    const remapped = mockHealth.missing.map((id) => ({ track_id: id, source_path: `${newRoot}/track-${id}.mp3` }));
+    mockHealth = { ...mockHealth, missing: [], relocated: [...mockHealth.relocated, ...remapped.map((r) => r.track_id)] };
+    return { applied: { relocation_id: 1, remapped, still_missing: 0 }, health: mockHealth };
+  }
+  return invoke('apply_relocate_folder', { oldRoot, newRoot });
+}
+
+export async function undoRelocateFolder(relocationId: number): Promise<{ undone: RemapUndone; health: LibraryHealth }> {
+  if (useBrowserMocks()) return { undone: { reverted: [], skipped: 0 }, health: mockHealth };
+  return invoke('undo_relocate_folder', { relocationId });
+}
+
+export async function lastFolderRelocation(): Promise<FolderRelocation | null> {
+  if (useBrowserMocks()) return null;
+  return invoke('last_folder_relocation');
 }
 
 export function listenToLibraryHealth(callback: (health: LibraryHealth) => void) {

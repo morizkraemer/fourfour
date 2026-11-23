@@ -179,6 +179,14 @@ export function backupRestoreFailureText(err: unknown): string {
   return `Couldn't restore the backup. ${cause ? `${cause} ` : ''}${SAFETY_COPY_SENTENCE} ${safetyPath}`;
 }
 
+export function playlistExportFailureText(err: unknown): string {
+  return failureText("Couldn't export the playlist.", err, { next: 'Try again, or save it somewhere else.' });
+}
+
+export function copyTracklistFailureText(err: unknown): string {
+  return failureText("Couldn't copy the tracklist.", err, { next: 'Try again.' });
+}
+
 export function rekordboxFailureText(err: unknown, what = "Couldn't read the Rekordbox library."): string {
   return failureText(what, err, { rules: REKORDBOX_RULES, next: 'Check the file or folder, then try again.' });
 }
@@ -203,6 +211,20 @@ export function relocateFailureText(err: unknown): string {
       { test: /is not in the library/i, reply: 'The track is no longer in the library.' },
     ],
     next: 'Choose the folder or file again.',
+  });
+}
+
+export function reconnectFailureText(err: unknown): string {
+  return failureText("Couldn't reconnect the files.", err, {
+    rules: [
+      { test: /is not a folder/i, reply: "That isn't a folder. Choose a folder." },
+      { test: /copy, not a move/i, reply: 'The original file is still where it was, so the other file is a copy.' },
+      { test: /already belongs to another track/i, reply: 'Another track already uses that file.' },
+      { test: /is not a readable file/i, reply: "fourfour can't read that file. Choose a different one." },
+      { test: /No file of .* was found/i, reply: 'None of the files are in that folder under the same names.' },
+      { test: /same folder/i, reply: 'The old and the new folder are the same.' },
+    ],
+    next: 'Choose the folder again.',
   });
 }
 

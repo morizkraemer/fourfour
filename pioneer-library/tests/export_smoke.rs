@@ -137,6 +137,54 @@ fn walk_files(root: &Path) -> Vec<PathBuf> {
 }
 
 #[test]
+fn v2_export_holds_the_same_library_as_the_default_export() {
+    use pioneer_usb_writer::stick::Stick;
+
+    let workspace = TempDir::new().unwrap();
+    let fixture = make_fixture_folder(workspace.path());
+    let library = LocalLibrary::open(&workspace.path().join("library.db")).unwrap();
+    import_folder(&library, &fixture);
+    let alpha = track_id_by_title(&library, "alpha");
+    let bravo = track_id_by_title(&library, "bravo");
+    let warmup = library.create_playlist("Warmup").unwrap();
+    library.set_playlist_tracks(warmup, &[bravo, alpha]).unwrap();
+
+    let old_usb = workspace.path().join("old");
+    let new_usb = workspace.path().join("new");
+    std::fs::create_dir_all(&old_usb).unwrap();
+    std::fs::create_dir_all(&new_usb).unwrap();
+    library.write_usb(&old_usb).unwrap();
+    let written = library.write_usb_v2(&new_usb, "SMOKE").unwrap();
+
+    let old = Stick::read(&old_usb).unwrap();
+    let new = Stick::read(&new_usb).unwrap();
+    let summary = |stick: &Stick| -> Vec<(String, String, String)> {
+        let model = stick.library().unwrap();
+        let mut rows: Vec<_> = model
+            .tracks
+            .iter()
+            .map(|t| (t.title.clone(), t.path.clone(), model.artist_name(t.artist_id).to_owned()))
+            .collect();
+        rows.sort();
+        rows
+    };
+    assert_eq!(summary(&new), summary(&old));
+    assert_eq!(new.track_count(), 3);
+    assert_eq!(written.tracks.len(), 3);
+    assert!(new.library().unwrap().tracks.iter().all(|t| t.tempo_x100 == 12800));
+    let model = new.library().unwrap();
+    let warmup_titles: Vec<&str> =
+        model.playlist_tracks(model.playlists[0].id).iter().map(|t| t.title.as_str()).collect();
+    assert_eq!(warmup_titles, ["bravo", "alpha"]);
+    assert_eq!(new.one_library.as_ref().unwrap().tracks.len(), 3);
+    for track in &model.tracks {
+        assert!(new.audio_path(track).is_file());
+        assert!(!new.read_analysis(track).unwrap().is_empty());
+    }
+    assert_usb_base_tree(&new_usb);
+}
+
+#[test]
 fn import_export_then_incremental_sync() {
     let workspace = TempDir::new().unwrap();
     let fixture = make_fixture_folder(workspace.path());

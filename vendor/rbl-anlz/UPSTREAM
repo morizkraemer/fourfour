@@ -1,0 +1,15 @@
+rbl-anlz, vendored from rbxport
+  Upstream: https://github.com/chrisle/rbxport, tag v1.10.0, commit d0ff75b378ec85be891d9f3067ada1e82bad4cae
+  Path upstream: crates/rbl-anlz (src, tests, README.md, examples/structure.rs, examples/cue_colours.rs)
+  Licence: GPL-2.0-or-later, Copyright (c) 2026 Chris Le. fourfour is GPL-3.0-or-later and
+  uses this code under the "or later" option. Licence text: LICENSE at the repository root.
+  Vendored: 2026-11-22
+
+Changes from upstream
+  - Cargo.toml rewritten: no workspace inheritance, upstream clippy lint table dropped, tracing without default features,
+    the rbl-core dependency and the rbl-db / rbl-index / dirs dev-dependencies removed.
+  - src/fourcc.rs added: the FourCc type copied from crates/rbl-core/src/lib.rs. Every
+    `use rbl_core::FourCc` now reads `use crate::FourCc` (src) or `use rbl_anlz::FourCc` (tests).
+  - Examples that need rbl-db, rbl-index or dirs left out (colourwave, overview_scale,
+    phrases, pwv4, rebuild, survey).
+  - Licence header added to every .rs file.

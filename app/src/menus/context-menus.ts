@@ -40,6 +40,8 @@ import type { PlaylistInput } from '../services/tauri.svelte.ts';
 import type { ALL_COLUMN_KEYS, TableLayout } from '../stores/table-columns.svelte.ts';
 import { pickAudioFiles, pickDirectory } from '../services/tauri.svelte.ts';
 import { createPlaylistAndOpen } from '../stores/new-playlist.svelte.ts';
+import { copyPlaylistTracklist, exportPlaylistToFile } from '../stores/playlist-export.svelte.ts';
+import { EXPORT_FORMATS } from '../lib/playlistExport.ts';
 import { dropPlaylistOnStick, dropPlaylistsOnStick } from '../stores/organize-drop.svelte.ts';
 import { ui } from '../stores/ui.svelte.ts';
 import { favouriteTrackIds } from '../lib/newPlaylist.ts';
@@ -107,6 +109,16 @@ function putOnStickItem(playlist: PlaylistInput): MenuItem {
     items: library.volumes.map((volume) => ({
       label: volumeLabel(volume),
       onClick: () => void dropPlaylistOnStick(volume, playlist.id),
+    })),
+  };
+}
+
+function exportItem(label: string, playlistId: number, foldersOnly = false): MenuItem {
+  return {
+    label,
+    items: EXPORT_FORMATS.filter((f) => !foldersOnly || f.foldersToo).map((f) => ({
+      label: f.label,
+      onClick: () => void exportPlaylistToFile(playlistId, f.format),
     })),
   };
 }
@@ -215,6 +227,11 @@ export function buildSourceContextMenuItems(opts: SourceMenuOptions): MenuItem[]
       onClick: () => importIntoSource(sourceId),
     });
     if (!isFavorite) items.push(putOnStickItem(playlist));
+    items.push(
+      { isSeparator: true },
+      exportItem('Export playlist…', playlist.id),
+      { label: 'Copy tracklist', onClick: () => void copyPlaylistTracklist(playlist.id) }
+    );
 
     if (isFavorite) {
       items.push(moveFavouritesToNewPlaylistItem(favoriteSlotFromName(playlist.name) ?? undefined));
@@ -277,6 +294,8 @@ export function buildFolderContextMenuItems(opts: FolderMenuOptions): MenuItem[]
     ...newPlaylistAndFolderItems(folder.id),
     { isSeparator: true },
     { label: 'Rename', onClick: () => onRename?.(folder) },
+    { isSeparator: true },
+    exportItem('Export folder…', folder.id, true),
     { isSeparator: true },
     {
       label: 'Delete folder',
@@ -547,5 +566,48 @@ export function buildColumnContextMenuItems(opts: ColumnMenuOptions): MenuItem[]
       disabled: !layout.sortKey,
       onClick: () => clearSort(),
     },
+  ];
+}
+
+interface StickTrackMenuOptions {
+  scope: 'all' | 'playlist';
+  count: number;
+  canEditPlaylist: boolean;
+  onRemove: () => void;
+  onShowInLibrary: () => void;
+}
+
+export function stickTrackRemoveLabel(scope: 'all' | 'playlist', count: number): string {
+  const what = count === 1 ? '' : `${count} `;
+  return scope === 'all' ? `Remove ${what}from stick` : `Remove ${what}from this playlist on the stick`;
+}
+
+export function buildStickTrackMenuItems(opts: StickTrackMenuOptions): MenuItem[] {
+  const { scope, count, canEditPlaylist, onRemove, onShowInLibrary } = opts;
+  if (count === 0) return [];
+  return [
+    { label: 'Show in library', disabled: count !== 1, onClick: onShowInLibrary },
+    { isSeparator: true },
+    {
+      label: stickTrackRemoveLabel(scope, count),
+      variant: 'danger',
+      disabled: scope === 'playlist' && !canEditPlaylist,
+      onClick: onRemove,
+    },
+  ];
+}
+
+interface StickPlaylistMenuOptions {
+  onOpen: () => void;
+  onShowInLibrary: () => void;
+  onTakeOff: () => void;
+}
+
+export function buildStickPlaylistMenuItems(opts: StickPlaylistMenuOptions): MenuItem[] {
+  return [
+    { label: 'Open', onClick: opts.onOpen },
+    { label: 'Show in library', onClick: opts.onShowInLibrary },
+    { isSeparator: true },
+    { label: 'Take off this stick', variant: 'danger', onClick: opts.onTakeOff },
   ];
 }

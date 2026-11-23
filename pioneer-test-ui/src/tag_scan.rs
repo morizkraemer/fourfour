@@ -6,11 +6,8 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use lofty::config::ParseOptions;
 use lofty::file::FileType;
-use lofty::prelude::*;
-use lofty::probe::Probe;
-use lofty::tag::ItemKey;
 use pioneer_usb_writer::models::Track;
-use pioneer_usb_writer::scanner::read_track_metadata;
+use pioneer_usb_writer::scanner::{check_tag_structure, track_from_reader};
 
 const ID3_HEADER_LEN: u64 = 10;
 const MAX_GAPS: usize = 64;
@@ -211,94 +208,48 @@ fn picture_gaps(file: &mut File, file_type: FileType) -> Vec<Range<u64>> {
     gaps.unwrap_or_default()
 }
 
-fn sanitize_path_component(s: &str) -> String {
-    s.chars()
-        .map(|c| match c {
-            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
-            _ => c,
-        })
-        .collect()
+#[cfg(target_os = "linux")]
+fn advise_random_access(file: &File) {
+    use std::os::fd::AsRawFd;
+    unsafe { libc::posix_fadvise(file.as_raw_fd(), 0, 0, libc::POSIX_FADV_RANDOM) };
 }
+
+#[cfg(not(target_os = "linux"))]
+fn advise_random_access(_file: &File) {}
 
 pub fn read_track_tags(path: &Path, id: u32) -> Result<Track> {
     let is_regular = std::fs::metadata(path).map(|m| m.is_file()).with_context(|| format!("Failed to open {}", path.display()))?;
     anyhow::ensure!(is_regular, "{} is not a regular file", path.display());
     let mut file = File::open(path).with_context(|| format!("Failed to open {}", path.display()))?;
+    advise_random_access(&file);
+    check_tag_structure(&mut file).with_context(|| format!("Refusing to read tags from {}", path.display()))?;
     let file_type = FileType::from_path(path);
     let gaps = file_type.map_or_else(Vec::new, |ft| picture_gaps(&mut file, ft));
     let has_gap_support = matches!(file_type, Some(FileType::Mpeg | FileType::Wav | FileType::Aiff | FileType::Mp4));
-    if gaps.is_empty() && has_gap_support {
-        return read_track_metadata(path, id).map(|track| Track { artwork: None, ..track });
-    }
-    let options = ParseOptions::new().read_cover_art(false);
-    let tagged_file = if gaps.is_empty() {
-        file.seek(SeekFrom::Start(0))?;
-        let mut probe = Probe::new(BufReader::new(file)).options(options);
-        if let Some(ft) = file_type {
-            probe = probe.set_file_type(ft);
-        }
-        probe.read()
-    } else {
+    let track = if !gaps.is_empty() {
         let reader = GapReader::new(file, gaps).with_context(|| format!("Failed to open {}", path.display()))?;
-        let mut probe = Probe::new(BufReader::with_capacity(READ_BUFFER_LEN, reader)).options(options);
-        if let Some(ft) = file_type {
-            probe = probe.set_file_type(ft);
-        }
-        probe.read()
-    }
-    .with_context(|| format!("Failed to read tags from {}", path.display()))?;
+        track_from_reader(&mut BufReader::with_capacity(READ_BUFFER_LEN, reader), ParseOptions::new().read_cover_art(false), path, id)?
+    } else {
+        file.seek(SeekFrom::Start(0))?;
+        let options = if has_gap_support { ParseOptions::new() } else { ParseOptions::new().read_cover_art(false) };
+        track_from_reader(&mut BufReader::new(file), options, path, id)?
+    };
+    Ok(Track { artwork: None, ..track })
+}
 
-    let properties = tagged_file.properties();
-    let duration = properties.duration();
-    let sample_rate = properties.sample_rate().unwrap_or(44100);
-    let bitrate = properties.overall_bitrate().unwrap_or(320);
-
-    let tag = tagged_file.primary_tag().or_else(|| tagged_file.first_tag());
-
-    let title = tag.and_then(|t| t.title().map(|s| s.to_string())).unwrap_or_else(|| {
-        path.file_stem().and_then(|s| s.to_str()).unwrap_or("Unknown").to_string()
-    });
-    let artist = tag.and_then(|t| t.artist().map(|s| s.to_string())).unwrap_or_else(|| "Unknown Artist".to_string());
-    let album = tag.and_then(|t| t.album().map(|s| s.to_string())).unwrap_or_else(|| "Unknown Album".to_string());
-    let genre = tag.and_then(|t| t.genre().map(|s| s.to_string())).unwrap_or_else(|| "Unknown".to_string());
-    let label = tag.and_then(|t| t.get_string(ItemKey::Publisher).map(|s| s.to_string())).unwrap_or_default();
-    let remixer = tag.and_then(|t| t.get_string(ItemKey::Remixer).map(|s| s.to_string())).unwrap_or_default();
-    let comment = tag.and_then(|t| t.get_string(ItemKey::Comment).map(|s| s.to_string())).unwrap_or_default();
-    let year = tag.and_then(|t| t.get_string(ItemKey::Year).and_then(|s| s.parse::<u16>().ok())).unwrap_or(0);
-    let disc_number = tag.and_then(|t| t.disk()).unwrap_or(0) as u16;
-    let track_number = tag.and_then(|t| t.track()).unwrap_or(0);
-    let file_size = std::fs::metadata(path)?.len();
-
-    let raw_filename = path.file_name().and_then(|f| f.to_str()).unwrap_or("unknown.mp3");
-    let usb_path = format!("/Contents/{}/{}", sanitize_path_component(&artist), sanitize_path_component(raw_filename));
-
-    Ok(Track {
-        source_path: path.to_path_buf(),
-        usb_path,
-        title,
-        artist,
-        album,
-        genre,
-        label,
-        remixer,
-        comment,
-        year,
-        disc_number,
-        track_number,
-        tempo: 0,
-        key: String::new(),
-        duration_secs: duration.as_secs_f64(),
-        sample_rate,
-        bitrate,
-        file_size,
-        id,
-        artwork: None,
-    })
+pub fn read_track_with_cover(path: &Path, id: u32) -> Result<Track> {
+    let is_regular = std::fs::metadata(path).map(|m| m.is_file()).with_context(|| format!("Failed to open {}", path.display()))?;
+    anyhow::ensure!(is_regular, "{} is not a regular file", path.display());
+    let mut file = File::open(path).with_context(|| format!("Failed to open {}", path.display()))?;
+    advise_random_access(&file);
+    check_tag_structure(&mut file).with_context(|| format!("Refusing to read tags from {}", path.display()))?;
+    track_from_reader(&mut BufReader::new(file), ParseOptions::new(), path, id)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pioneer_usb_writer::scanner::read_track_metadata;
     use std::io::Write;
 
     fn id3_frame(id: &[u8], body: &[u8], version: u8) -> Vec<u8> {
@@ -513,5 +464,171 @@ mod tests {
         }
         assert!(read_track_tags(Path::new("/dev/zero"), 1).is_err());
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    fn big_cover() -> Vec<u8> {
+        (0..400_000u32).map(|i| (i.wrapping_mul(31) >> 3) as u8).collect()
+    }
+
+    fn id3_tag_with_cover(cover: &[u8]) -> Vec<u8> {
+        let mut frames = text_frame(b"TIT2", "A Title", 4);
+        frames.extend(apic_frame(cover, 4));
+        frames.extend(text_frame(b"TPE1", "An Artist", 4));
+        frames.extend(text_frame(b"TALB", "An Album", 4));
+        let mut out = b"ID3".to_vec();
+        out.extend_from_slice(&[4, 0, 0]);
+        out.extend((0..4).rev().map(|i| ((frames.len() >> (7 * i)) & 0x7f) as u8));
+        out.extend(frames);
+        out
+    }
+
+    fn flac_with_cover(cover: &[u8]) -> Vec<u8> {
+        let block = |kind: u8, last: bool, body: &[u8]| {
+            let mut b = vec![kind | if last { 0x80 } else { 0 }];
+            b.extend_from_slice(&(body.len() as u32).to_be_bytes()[1..]);
+            b.extend_from_slice(body);
+            b
+        };
+        let mut info = Vec::new();
+        info.extend_from_slice(&4096u16.to_be_bytes());
+        info.extend_from_slice(&4096u16.to_be_bytes());
+        info.extend_from_slice(&[0; 6]);
+        info.extend_from_slice(&((44100u32 << 12) | (1 << 9) | (15 << 4)).to_be_bytes());
+        info.extend_from_slice(&441_000u32.to_be_bytes());
+        info.extend_from_slice(&[0; 16]);
+        let mut vorbis = Vec::new();
+        vorbis.extend_from_slice(&4u32.to_le_bytes());
+        vorbis.extend_from_slice(b"test");
+        let comments = ["TITLE=A Title", "ARTIST=An Artist", "ALBUM=An Album"];
+        vorbis.extend_from_slice(&(comments.len() as u32).to_le_bytes());
+        for c in comments {
+            vorbis.extend_from_slice(&(c.len() as u32).to_le_bytes());
+            vorbis.extend_from_slice(c.as_bytes());
+        }
+        let mut picture = Vec::new();
+        picture.extend_from_slice(&3u32.to_be_bytes());
+        picture.extend_from_slice(&10u32.to_be_bytes());
+        picture.extend_from_slice(b"image/jpeg");
+        picture.extend_from_slice(&0u32.to_be_bytes());
+        picture.extend_from_slice(&[0; 16]);
+        picture.extend_from_slice(&(cover.len() as u32).to_be_bytes());
+        picture.extend_from_slice(cover);
+        let mut out = b"fLaC".to_vec();
+        out.extend(block(0, false, &info));
+        out.extend(block(4, false, &vorbis));
+        out.extend(block(6, true, &picture));
+        out.extend(vec![0u8; 2000]);
+        out
+    }
+
+    fn aiff_with_cover(cover: &[u8]) -> Vec<u8> {
+        let chunk = |id: &[u8; 4], body: &[u8]| {
+            let mut c = id.to_vec();
+            c.extend_from_slice(&(body.len() as u32).to_be_bytes());
+            c.extend_from_slice(body);
+            if body.len() % 2 == 1 {
+                c.push(0);
+            }
+            c
+        };
+        let mut comm = Vec::new();
+        comm.extend_from_slice(&2u16.to_be_bytes());
+        comm.extend_from_slice(&100u32.to_be_bytes());
+        comm.extend_from_slice(&16u16.to_be_bytes());
+        comm.extend_from_slice(&[0x40, 0x0E, 0xAC, 0x44, 0, 0, 0, 0, 0, 0]);
+        let mut ssnd = vec![0u8; 8];
+        ssnd.extend(vec![0u8; 400]);
+        let mut body = b"AIFF".to_vec();
+        body.extend(chunk(b"COMM", &comm));
+        body.extend(chunk(b"SSND", &ssnd));
+        body.extend(chunk(b"ID3 ", &id3_tag_with_cover(cover)));
+        let mut out = b"FORM".to_vec();
+        out.extend_from_slice(&(body.len() as u32).to_be_bytes());
+        out.extend(body);
+        out
+    }
+
+    fn wav_with_cover(cover: &[u8]) -> Vec<u8> {
+        let chunk = |id: &[u8; 4], body: &[u8]| {
+            let mut c = id.to_vec();
+            c.extend_from_slice(&(body.len() as u32).to_le_bytes());
+            c.extend_from_slice(body);
+            if body.len() % 2 == 1 {
+                c.push(0);
+            }
+            c
+        };
+        let mut fmt = Vec::new();
+        fmt.extend_from_slice(&1u16.to_le_bytes());
+        fmt.extend_from_slice(&2u16.to_le_bytes());
+        fmt.extend_from_slice(&44100u32.to_le_bytes());
+        fmt.extend_from_slice(&176_400u32.to_le_bytes());
+        fmt.extend_from_slice(&4u16.to_le_bytes());
+        fmt.extend_from_slice(&16u16.to_le_bytes());
+        let mut body = b"WAVE".to_vec();
+        body.extend(chunk(b"fmt ", &fmt));
+        body.extend(chunk(b"data", &vec![0u8; 400]));
+        body.extend(chunk(b"id3 ", &id3_tag_with_cover(cover)));
+        let mut out = b"RIFF".to_vec();
+        out.extend_from_slice(&(body.len() as u32).to_le_bytes());
+        out.extend(body);
+        out
+    }
+
+    fn assert_tags_equal_and_cover_kept(name: &str, bytes: &[u8], cover: &[u8]) {
+        let dir = std::env::temp_dir().join(format!("ff-tagscan-cover-{}-{name}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(name);
+        std::fs::write(&path, bytes).unwrap();
+        let full = read_track_metadata(&path, 7).unwrap();
+        let quick = read_track_tags(&path, 7).unwrap();
+        let with_cover = read_track_with_cover(&path, 7).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(format!("{full:?}"), format!("{with_cover:?}"), "{name}: the cover read matches the full read");
+        assert_eq!(full.title, "A Title", "{name}");
+        assert_eq!(full.artwork.as_deref(), Some(cover), "{name}: the full read keeps the cover bytes");
+        assert_eq!(quick.artwork, None, "{name}");
+        assert_eq!(format!("{:?}", Track { artwork: None, ..full }), format!("{quick:?}"), "{name}");
+    }
+
+    #[test]
+    fn large_covers_in_every_format_leave_the_tags_and_the_stored_cover_unchanged() {
+        let cover = big_cover();
+        assert_tags_equal_and_cover_kept("c.mp3", &[id3_tag_with_cover(&cover), (0..40).flat_map(|_| [vec![0xFF, 0xFB, 0x90, 0x00], vec![0u8; 413]].concat()).collect()].concat(), &cover);
+        assert_tags_equal_and_cover_kept("c.flac", &flac_with_cover(&cover), &cover);
+        assert_tags_equal_and_cover_kept("c.aiff", &aiff_with_cover(&cover), &cover);
+        assert_tags_equal_and_cover_kept("c.wav", &wav_with_cover(&cover), &cover);
+    }
+
+    #[test]
+    fn advising_random_access_is_harmless_on_any_file() {
+        let dir = std::env::temp_dir().join(format!("ff-tagscan-advise-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("a.bin");
+        std::fs::write(&path, b"abc").unwrap();
+        let mut file = File::open(&path).unwrap();
+        advise_random_access(&file);
+        advise_random_access(&file);
+        let mut text = String::new();
+        file.read_to_string(&mut text).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(text, "abc");
+    }
+
+    #[test]
+    fn tag_floods_are_refused_by_the_import_reader_too() {
+        let dir = std::env::temp_dir().join(format!("ff-tagscan-flood-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("flood.flac");
+        let mut bytes = b"fLaC".to_vec();
+        for _ in 0..5000 {
+            bytes.extend_from_slice(&[0x02, 0, 0, 4, b'f', b'u', b'z', b'z']);
+        }
+        std::fs::write(&path, &bytes).unwrap();
+        let quick = read_track_tags(&path, 1);
+        let cover = read_track_with_cover(&path, 1);
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(quick.is_err());
+        assert!(cover.is_err());
     }
 }

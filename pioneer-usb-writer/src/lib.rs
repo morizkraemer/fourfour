@@ -23,6 +23,7 @@ pub mod cue_color;
 pub mod models;
 pub mod reader;
 pub mod scanner;
+pub mod stick;
 pub mod waveform;
 pub mod writer;
 

@@ -1,0 +1,417 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+// Copyright (c) 2026 Chris Le. From rbxport v1.10.0 (https://github.com/chrisle/rbxport), crates/rbl-anlz/src/cues.rs.
+// Vendored into fourfour, which distributes it under GPL-3.0-or-later. Changes: vendor/rbl-anlz/UPSTREAM.
+
+//! Device cue lists populated from the master database, whose share files
+//! contain empty cue lists. Layout checked against rekordbox 7 USB exports.
+use crate::Section;
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ExportCue {
+    /// Master database kind: memory=0, A-C=1-3, D-P=5-17, and 4 for the
+    /// memory loop set as the track's Active Loop.
+    pub kind: u8,
+    pub time_ms: u32,
+    pub loop_time_ms: Option<u32>,
+    /// A memory cue's colour row, 1 (Pink) to 8 (Purple) or 0 for none: its
+    /// `djmdCue.Color` through [`memory_colour_row`]. 0 on a hot cue.
+    pub color_id: u8,
+    pub color_code: u8,
+    pub comment: String,
+    pub active_loop: bool,
+    pub loop_numerator: u16,
+    pub loop_denominator: u16,
+}
+
+impl ExportCue {
+    /// The ANLZ hot-cue slot: 0 for a memory cue, 1-16 for A-P.
+    pub fn slot(&self) -> u32 {
+        u32::from(match self.kind {
+            4 => 0,
+            kind if kind >= 5 => kind - 1,
+            kind => kind,
+        })
+    }
+
+    /// A memory cue or loop, the Active Loop (Kind 4) included: rekordbox
+    /// 7.2.19's `DatabaseMediator::getExportCue` @0x1009bc884 files kinds
+    /// 0 and 4 in the memory list [OBS static].
+    pub fn is_memory(&self) -> bool {
+        matches!(self.kind, 0 | 4)
+    }
+}
+
+/// The colour row a device is sent for a memory cue's `djmdCue.Color`: the
+/// eight colours, 0 (Pink) to 7 (Purple), are rows 1 to 8, and anything else
+/// (255, or the -1 rekordbox writes for No Color) is 0, no colour.
+///
+/// [OBS static, rekordbox 7.2.19 arm64] `PCP2`'s byte at `0x1c`
+/// (`DatabaseMediator::convert_cue_to_extPointdata` @0x1009bd51c: `Color + 1`
+/// when `Color <= 7`, else 0) and the LINK extended cue entry's byte at `0x3a`
+/// (`PSvDBMain::GetUsbCueExtSharedContent` @0x1018c9c98, the same test).
+pub fn memory_colour_row(color: i64) -> u8 {
+    u8::try_from(color).ok().filter(|c| *c <= 7).map_or(0, |c| c + 1)
+}
+
+/// The `djmdCue.Color` a device's memory colour row stands for, or `None`
+/// for none: [`memory_colour_row`] the other way. [OBS static, rekordbox
+/// 7.2.19 arm64] `CMusicAnalyzeFile::get_pmai_ext_specified_memcue_ext`
+/// @0x100f23590 reads `row - 1` for a row below 9 and 0xff (none) otherwise,
+/// so row 0 is none too.
+pub fn memory_colour_of_row(row: u8) -> Option<u8> {
+    (1..=8).contains(&row).then(|| row - 1)
+}
+
+fn put32(b: &mut [u8], at: usize, n: u32) {
+    b[at..at + 4].copy_from_slice(&n.to_be_bytes());
+}
+fn put16(b: &mut [u8], at: usize, n: u16) {
+    b[at..at + 2].copy_from_slice(&n.to_be_bytes());
+}
+
+/// DAT carries memory and A-C; EXT adds D-P and the complete extended lists.
+pub fn sections(cues: &[ExportCue], extended: bool) -> Vec<Section> {
+    let ordered: Vec<_> = cues.iter().collect();
+    let mut out = Vec::new();
+    for modern in [false, true] {
+        if modern && !extended {
+            continue;
+        }
+        for hot in [true, false] {
+            let list: Vec<_> = ordered
+                .iter()
+                .copied()
+                .filter(|c| {
+                    c.is_memory() != hot
+                        && (modern
+                            || if extended {
+                                hot && c.slot() > 3
+                            } else {
+                                c.slot() <= 3
+                            })
+                })
+                .collect();
+            let count = u16::try_from(list.len()).unwrap_or(u16::MAX);
+            let mut header = vec![0; if modern { 8 } else { 12 }];
+            put32(&mut header, 0, u32::from(hot));
+            put16(&mut header, if modern { 4 } else { 6 }, count);
+            if !modern {
+                put32(
+                    &mut header,
+                    8,
+                    if hot || count == 0 {
+                        u32::MAX
+                    } else {
+                        u32::from(count - 1)
+                    },
+                );
+            }
+            let mut payload = Vec::new();
+            for (index, cue) in list.into_iter().take(usize::from(count)).enumerate() {
+                let comment: Vec<u8> = if cue.comment.is_empty() {
+                    Vec::new()
+                } else {
+                    cue.comment
+                        .encode_utf16()
+                        .chain([0])
+                        .flat_map(u16::to_be_bytes)
+                        .collect()
+                };
+                let length = if modern { 88 + comment.len() } else { 56 };
+                let mut entry = vec![0; length];
+                entry[..4].copy_from_slice(if modern { b"PCP2" } else { b"PCPT" });
+                put32(&mut entry, 4, if modern { 16 } else { 28 });
+                put32(&mut entry, 8, u32::try_from(length).unwrap_or(u32::MAX));
+                put32(&mut entry, 12, cue.slot());
+                let at = if modern { 16 } else { 28 };
+                entry[at] = if cue.loop_time_ms.is_some() { 2 } else { 1 };
+                entry[at + 1..at + 4].copy_from_slice(&[0, 3, 232]);
+                put32(&mut entry, at + 4, cue.time_ms);
+                put32(&mut entry, at + 8, cue.loop_time_ms.unwrap_or(u32::MAX));
+                if modern {
+                    entry[28] = cue.color_id;
+                    entry[29] = 1;
+                    put16(&mut entry, 36, cue.loop_numerator);
+                    put16(&mut entry, 38, cue.loop_denominator);
+                    put32(
+                        &mut entry,
+                        40,
+                        u32::try_from(comment.len()).unwrap_or(u32::MAX),
+                    );
+                    entry[44..44 + comment.len()].copy_from_slice(&comment);
+                    entry[44 + comment.len()] = cue.color_code;
+                    entry[45 + comment.len()..48 + comment.len()]
+                        .copy_from_slice(&export_colour(cue.color_code, cue.slot()));
+                } else {
+                    put32(&mut entry, 16, if cue.active_loop { 4 } else { 0 });
+                    put32(&mut entry, 20, 0x10000);
+                    put16(
+                        &mut entry,
+                        24,
+                        if hot || index == 0 {
+                            u16::MAX
+                        } else {
+                            u16::try_from(index - 1).unwrap_or(u16::MAX)
+                        },
+                    );
+                    put16(
+                        &mut entry,
+                        26,
+                        if hot || index + 1 == usize::from(count) {
+                            u16::MAX
+                        } else {
+                            u16::try_from(index + 1).unwrap_or(u16::MAX)
+                        },
+                    );
+                }
+                payload.extend(entry);
+            }
+            out.push(Section::new(
+                if modern { b"PCO2" } else { b"PCOB" },
+                header,
+                payload,
+            ));
+        }
+    }
+    out
+}
+
+// CDJ-3000 3.20 EP122 palette, file offset 0x1b55a58 (also at three
+// independent copies). Every previously measured export color matches it.
+const DEVICE_PALETTE: [[u8; 3]; 65] = [
+    [0x00, 0x00, 0x00],
+    [0x00, 0x00, 0xff],
+    [0x00, 0x1c, 0xff],
+    [0x00, 0x38, 0xff],
+    [0x00, 0x54, 0xff],
+    [0x00, 0x70, 0xff],
+    [0x00, 0x8c, 0xff],
+    [0x00, 0xa8, 0xff],
+    [0x00, 0xc4, 0xff],
+    [0x00, 0xe0, 0xff],
+    [0x00, 0xff, 0xff],
+    [0x00, 0xff, 0xe8],
+    [0x00, 0xff, 0xd1],
+    [0x00, 0xff, 0xba],
+    [0x00, 0xff, 0xa3],
+    [0x00, 0xff, 0x8c],
+    [0x00, 0xff, 0x75],
+    [0x00, 0xff, 0x5e],
+    [0x00, 0xff, 0x47],
+    [0x00, 0xff, 0x30],
+    [0x00, 0xff, 0x1a],
+    [0x00, 0xff, 0x00],
+    [0x1a, 0xff, 0x00],
+    [0x33, 0xff, 0x00],
+    [0x4d, 0xff, 0x00],
+    [0x66, 0xff, 0x00],
+    [0x80, 0xff, 0x00],
+    [0x99, 0xff, 0x00],
+    [0xb3, 0xff, 0x00],
+    [0xcc, 0xff, 0x00],
+    [0xe6, 0xff, 0x00],
+    [0xff, 0xff, 0x00],
+    [0xff, 0xe8, 0x00],
+    [0xff, 0xd1, 0x00],
+    [0xff, 0xba, 0x00],
+    [0xff, 0xa3, 0x00],
+    [0xff, 0x8c, 0x00],
+    [0xff, 0x75, 0x00],
+    [0xff, 0x5e, 0x00],
+    [0xff, 0x47, 0x00],
+    [0xff, 0x30, 0x00],
+    [0xff, 0x1a, 0x00],
+    [0xff, 0x00, 0x00],
+    [0xff, 0x00, 0x17],
+    [0xff, 0x00, 0x2e],
+    [0xff, 0x00, 0x45],
+    [0xff, 0x00, 0x5c],
+    [0xff, 0x00, 0x73],
+    [0xff, 0x00, 0x8a],
+    [0xff, 0x00, 0xa1],
+    [0xff, 0x00, 0xb8],
+    [0xff, 0x00, 0xcf],
+    [0xff, 0x00, 0xe6],
+    [0xff, 0x00, 0xff],
+    [0xe6, 0x00, 0xff],
+    [0xcc, 0x00, 0xff],
+    [0xb3, 0x00, 0xff],
+    [0x99, 0x00, 0xff],
+    [0x80, 0x00, 0xff],
+    [0x66, 0x00, 0xff],
+    [0x4d, 0x00, 0xff],
+    [0x33, 0x00, 0xff],
+    [0x1a, 0x00, 0xff],
+    [0, 0, 0],
+    [255, 255, 255],
+];
+
+/// The device RGB a player is sent for a hot cue's `ColorTableIndex`, as
+/// `PCO2` carries it after the colour code. `slot` is 1 for A; a code of 0
+/// gets the slot's default colour.
+pub fn export_colour(code: u8, slot: u32) -> [u8; 3] {
+    // Default colors read from rekordbox exports for A-D and I-L.
+    let default = match slot {
+        1 | 9 => 43,
+        2 | 10 => 8,
+        3 | 11 => 23,
+        4 | 12 => 60,
+        _ => 0,
+    };
+    DEVICE_PALETTE
+        .get(usize::from(if code == 0 { default } else { code }))
+        .copied()
+        .unwrap_or([0; 3])
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::*;
+    #[test]
+    fn matches_a_rekordbox_hot_cue_record_and_complete_palette() {
+        let cue = ExportCue {
+            kind: 1,
+            time_ms: 83_032,
+            color_code: 46,
+            ..Default::default()
+        };
+        let sections = sections(&[cue], true);
+        let entry = &sections[2].payload;
+        let expected = "50435032000000100000005800000001010003e800014458ffffffff000100000000000000000000000000002eff005c00000000000000000000000000000000000000000000000000000000000000000000000000000000";
+        let actual = entry.iter().fold(String::new(), |mut s, v| {
+            use std::fmt::Write;
+            write!(s, "{v:02x}").unwrap();
+            s
+        });
+        assert_eq!(actual, expected);
+        for (code, rgb) in crate::MEASURED_CUE_COLOURS.iter().skip(1) {
+            assert_eq!(export_colour(*code, 1), *rgb);
+        }
+        assert_eq!(export_colour(0, 1), [255, 0, 23]);
+        assert_eq!(export_colour(62, 1), [26, 0, 255]);
+    }
+    #[test]
+    fn exports_memory_loop_comments_colors_and_the_d_slot() {
+        let cues = vec![
+            ExportCue {
+                kind: 5,
+                time_ms: 1000,
+                color_code: 8,
+                comment: "Drop 🎵".into(),
+                ..Default::default()
+            },
+            ExportCue {
+                time_ms: 2000,
+                loop_time_ms: Some(4000),
+                active_loop: true,
+                loop_numerator: 4,
+                loop_denominator: 1,
+                comment: "Loop".into(),
+                ..Default::default()
+            },
+        ];
+        let dat = sections(&cues, false);
+        assert_eq!(dat[0].payload, [] as [u8; 0]);
+        assert_eq!(&dat[1].payload[16..20], &4_u32.to_be_bytes());
+        let ext = sections(&cues, true);
+        let decoded = ext[2].as_cue_entries().unwrap();
+        assert_eq!(decoded[0].hot_cue, 4);
+        assert_eq!(decoded[0].comment.as_deref(), Some("Drop 🎵"));
+        assert_eq!(decoded[0].rgb, Some([0, 196, 255]));
+        let memory = ext[3].as_cue_entries().unwrap();
+        assert_eq!(
+            (memory[0].kind, memory[0].time_ms, memory[0].loop_time_ms),
+            (2, 2000, 4000)
+        );
+        assert_eq!(&ext[3].payload[36..40], &[0, 4, 0, 1]);
+    }
+
+    /// The Active Loop is desktop Kind 4 (#577). rekordbox 7.2.19's
+    /// `getExportCue` @0x1009bc884 files it with the memory cues, hot slot 0,
+    /// and sets the PCPT word at 0x10 to 4; PCP2 has no such word, and the
+    /// entry is a loop there as in PCPT [OBS static].
+    #[test]
+    fn an_active_loop_is_exported_as_a_memory_loop_marked_active() {
+        let cues = vec![
+            ExportCue { kind: 1, time_ms: 500, ..Default::default() },
+            ExportCue {
+                kind: 4,
+                time_ms: 2000,
+                loop_time_ms: Some(4000),
+                active_loop: true,
+                color_id: 3,
+                ..Default::default()
+            },
+            ExportCue { kind: 5, time_ms: 9000, ..Default::default() },
+        ];
+        assert_eq!(cues[1].slot(), 0);
+        let dat = sections(&cues, false);
+        // PCPT entries are 56 bytes: one hot cue (A), one memory loop.
+        assert_eq!(dat[0].payload.len(), 56, "not a hot cue, not slot D");
+        assert_eq!(&dat[0].payload[12..16], &1_u32.to_be_bytes());
+        assert_eq!(dat[1].payload.len(), 56);
+        let memory = &dat[1].payload;
+        assert_eq!(&memory[12..16], &0_u32.to_be_bytes(), "hot slot 0");
+        assert_eq!(&memory[16..20], &4_u32.to_be_bytes(), "active");
+        assert_eq!(memory[28], 2, "a loop");
+        assert_eq!(&memory[32..40], &[0, 0, 7, 208, 0, 0, 15, 160], "2000 to 4000 ms");
+        let ext = sections(&cues, true);
+        let extended_hot = ext[2].as_cue_entries().unwrap();
+        assert_eq!(extended_hot.iter().map(|c| c.hot_cue).collect::<Vec<_>>(), [1, 4]);
+        let extended_memory = ext[3].as_cue_entries().unwrap();
+        assert_eq!(extended_memory.len(), 1);
+        assert_eq!((extended_memory[0].hot_cue, extended_memory[0].kind), (0, 2));
+        assert_eq!(extended_memory[0].color_id, 3, "a memory cue's colour");
+    }
+
+    #[test]
+    fn dat_legacy_cues_keep_hot_memory_loop_and_active_state() {
+        let cues = [
+            ExportCue { kind: 1, time_ms: 25, ..Default::default() },
+            ExportCue { kind: 4, time_ms: 494, loop_time_ms: Some(2369), active_loop: true, ..Default::default() },
+        ];
+        let dat = sections(&cues, false);
+        let hot = dat[0].as_legacy_cue_entries().unwrap();
+        let memory = dat[1].as_legacy_cue_entries().unwrap();
+        assert_eq!((hot[0].hot_cue, hot[0].time_ms, hot[0].library_kind()), (1, 25, 1));
+        assert_eq!((memory[0].kind, memory[0].time_ms, memory[0].loop_time_ms, memory[0].library_kind()), (2, 494, 2369, 4));
+        assert_eq!(memory[0].comment, None);
+        let mut truncated = dat[1].clone();
+        truncated.payload.truncate(55);
+        assert_eq!(truncated.as_legacy_cue_entries().unwrap(), []);
+    }
+
+    #[test]
+    fn dat_legacy_cues_respect_declared_count() {
+        let cues = [
+            ExportCue { kind: 1, time_ms: 25, ..Default::default() },
+            ExportCue { kind: 2, time_ms: 50, ..Default::default() },
+        ];
+        let mut hot = sections(&cues, false).remove(0);
+        assert_eq!(hot.payload.len(), 112);
+        hot.header[6..8].copy_from_slice(&0_u16.to_be_bytes());
+        assert_eq!(hot.as_legacy_cue_entries().unwrap(), Vec::new());
+        hot.header[6..8].copy_from_slice(&1_u16.to_be_bytes());
+        let entries = hot.as_legacy_cue_entries().unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].time_ms, 25);
+    }
+
+    /// #617: `djmdCue.Color` 0 (Pink) to 7 (Purple) goes to a device as rows
+    /// 1 to 8, none as 0, and a device's row comes back as the same Color.
+    #[test]
+    fn a_memory_cue_colour_is_one_row_up_on_a_device_and_back() {
+        let rows: Vec<u8> = (0..=7).map(memory_colour_row).collect();
+        assert_eq!(rows, [1, 2, 3, 4, 5, 6, 7, 8]);
+        for none in [255, -1, 8, 64, i64::from(u16::MAX)] {
+            assert_eq!(memory_colour_row(none), 0, "{none} is no colour");
+        }
+        let back: Vec<Option<u8>> = (0..=9).map(memory_colour_of_row).collect();
+        assert_eq!(
+            back,
+            [None, Some(0), Some(1), Some(2), Some(3), Some(4), Some(5), Some(6), Some(7), None]
+        );
+        assert_eq!(memory_colour_of_row(255), None);
+    }
+}

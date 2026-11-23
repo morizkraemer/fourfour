@@ -50,7 +50,7 @@ fn loading_without_weights_fails_with_the_directory_in_the_message() {
         Ok(_) => panic!("load must fail without weights"),
         Err(e) => e.to_string(),
     };
-    assert!(err.contains("onnx") || err.contains("No such file") || err.contains("mel_spectrogram"), "{err}");
+    assert!(err.contains("onnx") || err.contains("No such file") || err.contains("os error 2") || err.contains("mel_spectrogram"), "{err}");
 }
 
 #[test]

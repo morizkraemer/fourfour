@@ -357,7 +357,7 @@ Code: `ov-1028` (`67f6607`) plus `r6-import`. Box: `dev`, 16 cores, load 12-17 (
 
 ### What is left
 
-- **The cold scan reads every embedded cover.** lofty reads an ID3v2 picture frame through even with `read_cover_art(false)` (it skips by reading), so a cold 10k import still reads 2.7 GB (1.5 GB of covers plus readahead) and is bound by the disk: 1.6 s on a calm box, 4-6 s when other workers use the disk. An ID3 frame walker that seeks past `APIC` (or a lofty change) is the next step; it sits in `pioneer-usb-writer/src/scanner.rs`, not touched here.
+- **Cold scan bytes (corrected 2026-11-21, `docs/analysis/perf-scan.md`).** The seek-past reader exists since R92 (`tag_scan.rs` zero-fills picture bodies in the first tag pass), so the first pass no longer reads covers. The 2.7 GB seen here was readahead around small tags (527 MB at 10k) plus the background cover pass (2.3 GB, of which about 1.5 GB is real covers that are needed). `posix_fadvise(RANDOM)` on the tag and cover reads (Linux only; the macOS `F_RDAHEAD` 0 variant made sparse tag reads ~10x slower in a Mac test 2026-11-22 and was dropped) cut the cold 10k import to 1.67 GB read.
 - **Covers take 8-10 s (10k) to 21-31 s (25k) in the background** (1.5 GB / 3.7 GB written to the log and checkpointed). A USB export started in that window writes the tracks still queued without artwork.
 - Commit at 25k is 0.6-1.0 s, mostly the three indexes on `tracks` (`source_path` has both the UNIQUE index and `idx_tracks_source_path`; dropping the duplicate is a schema change).
 

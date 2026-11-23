@@ -1,0 +1,39 @@
+{
+  "id": "q60-duplicates",
+  "title": "Clean up duplicates",
+  "question": "Library menu > Find duplicates… groups copies, picks a keeper with a reason, you accept or skip. Merged copies go to an Archive and can be restored. No file is deleted. Is the 'Keeper: …' reason line clear enough to accept all exact matches without checking? Rec: yes.",
+  "url": "/lab.html",
+  "media": "/data/cards/q60-duplicates/media/duplicates-1-activity-menu.png",
+  "gallery": [
+    {
+      "url": "/data/cards/q60-duplicates/media/duplicates-1-activity-menu.png",
+      "label": "menu"
+    },
+    {
+      "url": "/data/cards/q60-duplicates/media/duplicates-2-groups.png",
+      "label": "groups"
+    },
+    {
+      "url": "/data/cards/q60-duplicates/media/duplicates-3-archive.png",
+      "label": "archive"
+    }
+  ],
+  "options": [
+    {
+      "key": "menu",
+      "label": "Activity menu"
+    },
+    {
+      "key": "groups",
+      "label": "Duplicates tab"
+    },
+    {
+      "key": "archive",
+      "label": "Archive tab"
+    }
+  ],
+  "rank": 100,
+  "status": "backlog",
+  "round": 1,
+  "created": "2026-11-21T03:44:16.227Z"
+}

@@ -22,14 +22,14 @@ const DB_REL_PATH: [&str; 3] = ["PIONEER", "rekordbox", "exportLibrary.db"];
 
 /// Rekordbox key names indexed by key_id (1-based).
 /// IDs 1-12 = major keys, 13-24 = minor keys.
-const KEY_NAMES: [&str; 24] = [
+pub(crate) const KEY_NAMES: [&str; 24] = [
     "C", "Db", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B",
     "Cm", "Dbm", "Dm", "Ebm", "Em", "Fm", "F#m", "Gm", "Abm", "Am", "Bbm", "Bm",
 ];
 
 // ── Color Names (Pioneer fixed 8 colors) ─────────────────────────
 
-const COLOR_NAMES: [&str; 8] = [
+pub(crate) const COLOR_NAMES: [&str; 8] = [
     "Pink", "Red", "Orange", "Yellow", "Green", "Aqua", "Blue", "Purple",
 ];
 
@@ -203,7 +203,7 @@ pub fn write_onelibrary(
 // ── Database Connection ──────────────────────────────────────────
 
 /// Open (or create) the SQLCipher database and set the encryption key.
-fn open_db(path: &Path) -> Result<Connection> {
+pub(crate) fn open_db(path: &Path) -> Result<Connection> {
     let conn = Connection::open(path)
         .with_context(|| format!("Failed to open OneLibrary DB at {}", path.display()))?;
 
@@ -222,7 +222,7 @@ fn open_db(path: &Path) -> Result<Connection> {
 
 // ── Schema Creation ──────────────────────────────────────────────
 
-fn create_tables(conn: &Connection) -> Result<()> {
+pub(crate) fn create_tables(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "
         CREATE TABLE IF NOT EXISTS content(
@@ -461,7 +461,7 @@ fn populate_color_table(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-fn populate_menu_item_table(conn: &Connection) -> Result<()> {
+pub(crate) fn populate_menu_item_table(conn: &Connection) -> Result<()> {
     let mut stmt =
         conn.prepare("INSERT INTO menuItem (menuItem_id, kind, name) VALUES (?1, ?2, ?3)")?;
     for &(id, kind, name) in &MENU_ITEMS {
@@ -471,7 +471,7 @@ fn populate_menu_item_table(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-fn populate_category_table(conn: &Connection) -> Result<()> {
+pub(crate) fn populate_category_table(conn: &Connection) -> Result<()> {
     let mut stmt = conn.prepare(
         "INSERT INTO category (category_id, menuItem_id, sequenceNo, isVisible) VALUES (?1, ?2, ?3, ?4)",
     )?;
@@ -482,7 +482,7 @@ fn populate_category_table(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-fn populate_sort_table(conn: &Connection) -> Result<()> {
+pub(crate) fn populate_sort_table(conn: &Connection) -> Result<()> {
     // Sort entries — visible sort columns for CDJ browsing
     let sort_items: [(i32, i32); 10] = [
         (4, 1),   // TRACK
@@ -509,7 +509,7 @@ fn populate_sort_table(conn: &Connection) -> Result<()> {
 // ── Key Mapping ──────────────────────────────────────────────────
 
 /// Map DJ notation key (e.g. "1A", "5B") to rekordbox key ID (1-24).
-fn key_name_to_id(key: &str) -> u32 {
+pub(crate) fn key_name_to_id(key: &str) -> u32 {
     // key_id 1-12 = C,Db,D,Eb,E,F,F#,G,Ab,A,Bb,B (major)
     // key_id 13-24 = Cm,Dbm,...,Bm (minor)
     // DJ notation: 1A=C(1), 2A=G(8), 3A=D(3), 4A=A(10), 5A=E(5), 6A=B(12),

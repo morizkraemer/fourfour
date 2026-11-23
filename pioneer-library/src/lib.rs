@@ -11,16 +11,21 @@
 mod analysis_write;
 pub mod backup;
 mod cover_store;
+mod dedupe;
+mod dedupe_merge;
 mod duplicates;
 mod edits;
 pub mod failure;
 mod file_health;
 mod multi_sync;
 mod queries;
+pub mod playlist_export;
+mod reconnect;
 pub mod rekordbox;
 mod revision;
 mod row_preview;
 mod schema;
+pub mod stick_sync;
 pub mod sticks;
 mod user_edits;
 
@@ -35,6 +40,7 @@ use serde::{Deserialize, Serialize};
 use pioneer_usb_writer::models::{
     AnalysisResult, Beat, BeatGrid, ColorWaveform, Playlist, SyncReport, Track, WaveformPreview,
 };
+use pioneer_usb_writer::stick::{StickDevice, StickModel};
 use pioneer_usb_writer::{reader, writer};
 
 pub use analysis_write::{AnalysisWrite, StagedAnalysis, remove_stale_staging};
@@ -42,8 +48,14 @@ pub use cover_store::{COVERS_DIR, covers_dir_of};
 pub use schema::{SCHEMA_VERSION, TAG_FOLD_VERSION};
 use cover_store::CoverStore;
 pub use duplicates::{DURATION_TOLERANCE_SECS, DuplicateCandidate, DuplicateIndex, DuplicateOf, DuplicateReason, normalise_tag, file_name_key, path_key};
+pub use dedupe::{DuplicateConfidence, DuplicateGroup, DuplicateMember, DuplicateRow, files_identical, find_duplicate_groups, is_lossless};
+pub use dedupe_merge::{ARCHIVE_DIR, ArchivedMerge, ArchivedTrack, MergeFailure, MergeOutcome, MergeReport, MergeRequest, RestoreOutcome};
 pub use edits::{EDITS_FILE, HOT_CUE_SLOTS, UserEdits};
 pub use file_health::{FileStatus, Relinked, RelocateReport, TrackFile, file_status};
+pub use reconnect::{
+    ChoiceReason, FingerprintTarget, FolderRelocation, MissingTrack, ReconnectChoice, ReconnectInputs, ReconnectPlan,
+    RemapApplied, RemapPreview, RemapUndone, content_hash, fingerprint_files, plan_reconnect,
+};
 use rekordbox::ImportedCue;
 
 /// One beat of an edited grid: where it is and its place in the bar (1 to 4).
@@ -54,12 +66,13 @@ pub struct BeatPosition {
 }
 
 pub use multi_sync::{
-    NoProgress, PlanTrack, PreparedMultiSync, ProgressSink, StickProgress, StickReport,
-    StickStatus, SyncPhase, SyncSelection, SyncTarget, UsbSyncPlan, VolumeCapacity, WriterFn,
+    KeptSelection, NoProgress, PlanTrack, PreparedMultiSync, ProgressSink, StickProgress, StickReport,
+    StickStatus, SyncEngine, SyncPhase, SyncSelection, SyncTarget, UsbSyncPlan, VolumeCapacity, WriterFn,
+    SYNC_ENGINE_ENV,
     statvfs_available_bytes, volume_capacity,
 };
 pub use revision::LibraryRevision;
-pub use sticks::StickContents;
+pub use sticks::{KeptPlaylist, StickContents};
 pub use user_edits::{LABELS_CACHE_FILE, MAX_BPM, MIN_BPM, TrackLabels, TrackLabelsChange, TrackLabelsReader, is_camelot};
 pub use row_preview::{ROW_BAND_COLUMNS, RowPreview, effective_preview, row_bands};
 
@@ -1131,6 +1144,18 @@ impl LocalLibrary {
         let (usb_tracks, usb_analyses, usb_playlists) =
             prepare_for_usb(tracks, analyses, playlists);
         writer::filesystem::sync_usb(output_dir, &usb_tracks, &usb_analyses, &usb_playlists)
+    }
+
+    pub fn write_usb_v2(&self, output_dir: &Path, device_name: &str) -> Result<StickModel> {
+        let (tracks, analyses) = self.get_analyzed_tracks()?;
+        let playlists = self.get_all_playlists()?;
+        let (usb_tracks, usb_analyses, usb_playlists) = prepare_for_usb(tracks, analyses, playlists);
+        let device = StickDevice {
+            name: device_name.to_owned(),
+            created_date: chrono::Local::now().format("%Y-%m-%d").to_string(),
+            ..StickDevice::default()
+        };
+        pioneer_usb_writer::stick::emit::write_usb_v2(output_dir, &usb_tracks, &usb_analyses, &usb_playlists, device)
     }
 
     // -----------------------------------------------------------------------

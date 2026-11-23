@@ -2,8 +2,8 @@
   Popover.svelte — the card that opens under a trigger (the player's track BPM and key pencils).
 
   It is the `.ff-menu` surface with dialog padding and a small arrow pointing at the trigger. It is
-  moved to <body>, stays inside the window, and closes on a click outside it (a click on the trigger
-  is left to the trigger) or Esc.
+  moved to <body>, stays inside the window, opens above the trigger when there is no room below, and
+  closes on a click outside it (a click on the trigger is left to the trigger) or Esc.
 -->
 <script lang="ts">
   import type { Snippet } from 'svelte';
@@ -41,13 +41,17 @@
   let left = $state(0);
   let top = $state(0);
   let arrowLeft = $state(0);
+  let above = $state(false);
 
   function place() {
     if (!anchor || !card) return;
     const rect = anchor.getBoundingClientRect();
     const centre = rect.left + rect.width / 2;
     left = Math.max(EDGE_PX, Math.min(centre - width / 2, window.innerWidth - width - EDGE_PX));
-    top = Math.max(EDGE_PX, Math.min(rect.bottom + GAP_PX, window.innerHeight - card.offsetHeight - EDGE_PX));
+    above = rect.bottom + GAP_PX + card.offsetHeight > window.innerHeight - EDGE_PX && rect.top - GAP_PX - card.offsetHeight >= EDGE_PX;
+    top = above
+      ? rect.top - GAP_PX - card.offsetHeight
+      : Math.max(EDGE_PX, Math.min(rect.bottom + GAP_PX, window.innerHeight - card.offsetHeight - EDGE_PX));
     arrowLeft = Math.max(ARROW_EDGE_PX, Math.min(centre - left, width - ARROW_EDGE_PX));
   }
 
@@ -94,6 +98,7 @@
   bind:this={card}
   class="ff-menu ff-popover"
   class:ff-popover--dense={dense}
+  class:ff-popover--above={above}
   role="dialog"
   aria-label={label}
   style:width="{width}px"
@@ -135,6 +140,11 @@
     border-left: 1px solid var(--ff-border-hi);
     border-top: 1px solid var(--ff-border-hi);
     transform: rotate(45deg);
+  }
+  .ff-popover--above .ff-popover__arrow {
+    top: auto;
+    bottom: -6px;
+    transform: rotate(225deg);
   }
   .ff-popover__title {
     display: flex;

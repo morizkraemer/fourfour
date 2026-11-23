@@ -9,15 +9,16 @@
 -->
 <script>
   import { FilterInput, Spinner, StatusDot } from '$ds';
+  import StickDot from './StickDot.svelte';
   import { library, sidebarSourceLabel, tracksForSidebarSource, filterTracks } from '../stores/library.svelte.ts';
-  import { ui, clearListFilter, setSearchText, openPalette, dockOrganizeTarget } from '../stores/ui.svelte.ts';
-  import { stickSync } from '../stores/stick-sync.svelte.ts';
-  import { stickAllTrackIds } from '../stores/sticks.svelte.ts';
+  import { ui, clearListFilter, setSearchText, openPalette } from '../stores/ui.svelte.ts';
+  import { statusOfStick, toggleStickProblem } from '../stores/stick-sync.svelte.ts';
+  import { showStickInfo } from '../shortcuts/navigation.ts';
   import { searchModeForColumn } from '../lib/searchLayout.ts';
   import SearchIconButton from './SearchIconButton.svelte';
   import LazyMount from '../lib/LazyMount.svelte';
   import { libraryActivityMenu } from '../lib/lazy-views.ts';
-  import { stickLabel, topbarStickStatus } from '../lib/topbarStatus.ts';
+  import { topbarStick } from '../lib/stickStatus.ts';
   import { fileStatus } from '../stores/file-status.svelte.ts';
   import { problemLabel } from '../lib/fileHealth.ts';
   import { libraryActivity } from '../lib/libraryActivity.ts';
@@ -51,14 +52,7 @@
   let contextLabel = $derived(showingProblems ? 'Missing tracks' : sidebarSourceLabel(ui.activeSidebarRow));
   let searchCollapsed = $derived(ui.searchMode !== 'field');
   let analyzing = $derived(library.analyzing && library.analysisProgress.total > 0);
-  let stick = $derived(
-    topbarStickStatus({
-      volumes: library.volumes,
-      activeVolume: library.activeVolume,
-      stickTrackCount: (volume) => stickAllTrackIds(volume).length,
-      sync: stickSync,
-    }),
-  );
+  let stick = $derived(topbarStick(library.volumes.map((volume) => ({ volume, status: statusOfStick(volume) }))));
   let filterCountLabel = $derived(
     ui.listFilter.trim()
       ? `${filteredCount} / ${activeTracks.length}`
@@ -115,10 +109,6 @@
     }
     const rect = e.currentTarget.getBoundingClientRect();
     statusMenu = { open: true, x: rect.left, y: rect.bottom + 4 };
-  }
-
-  function openIdleStick(volume) {
-    dockOrganizeTarget({ kind: 'usb', id: volume, label: stickLabel(volume) });
   }
 
   function onSearchFocusIn(e) {
@@ -191,8 +181,15 @@
       {/if}
     </button>
     {#if stick}
-      <button type="button" class="ff-gheader__chip ff-gheader__chip--idle" data-stick-chip onclick={() => openIdleStick(stick.volume)}>
-        <StatusDot status="online" /> {stick.name} <b>{stick.detail}</b>
+      <button
+        type="button"
+        class="ff-gheader__chip ff-gheader__chip--idle"
+        data-stick-chip={stick.status.kind}
+        title={stick.status.tone === 'problem' ? 'See what is going on' : `Show ${stick.name}`}
+        onclick={(e) => (stick.status.tone === 'problem' ? toggleStickProblem(stick.volume, e.currentTarget) : void showStickInfo(stick.volume))}
+      >
+        <StickDot tone={stick.status.tone} label={stick.status.label} />
+        {stick.name} <b>{stick.status.label}</b>{#if stick.others > 0}<span class="ff-gheader__chip-more">+{stick.others}</span>{/if}
       </button>
     {/if}
   </div>
@@ -348,6 +345,9 @@
   }
   .ff-gheader__chip--warn {
     color: var(--ff-status-warn);
+  }
+  .ff-gheader__chip-more {
+    color: var(--ff-muted);
   }
   .ff-gheader__chip b {
     font-weight: 500;

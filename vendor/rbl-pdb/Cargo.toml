@@ -1,0 +1,16 @@
+[package]
+name = "rbl-pdb"
+version = "1.10.0"
+edition = "2021"
+rust-version = "1.89"
+license = "GPL-2.0-or-later"
+authors = ["Chris Le"]
+description = "Reader and builder for the DeviceSQL database rekordbox writes to USB media. Vendored from rbxport."
+publish = false
+
+[lints.rust]
+unsafe_code = "deny"
+
+[dependencies]
+thiserror = "2"
+tracing = { version = "0.1", default-features = false, features = ["std"] }

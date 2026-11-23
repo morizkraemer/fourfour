@@ -4,7 +4,7 @@ use std::sync::Mutex;
 
 use pioneer_library::{DuplicateCandidate, DuplicateIndex, DuplicateOf, DuplicateReason, LocalLibrary, PreparedMultiSync, SyncTarget};
 use pioneer_usb_writer::models::Track;
-use pioneer_usb_writer::scanner::{read_track_metadata, AUDIO_EXTENSIONS};
+use pioneer_usb_writer::scanner::AUDIO_EXTENSIONS;
 use serde::Serialize;
 
 use crate::command_error::CommandError;
@@ -327,8 +327,13 @@ fn file_kind(ext: Option<&std::ffi::OsStr>) -> FileKind {
     }
 }
 
+const WINDOWS_SYSTEM_FOLDERS: [&str; 2] = ["$RECYCLE.BIN", "System Volume Information"];
+
 fn is_hidden(path: &Path) -> bool {
-    path.file_name().is_some_and(|n| n.to_string_lossy().starts_with('.'))
+    path.file_name().is_some_and(|n| {
+        let name = n.to_string_lossy();
+        name.starts_with('.') || WINDOWS_SYSTEM_FOLDERS.iter().any(|system| system.eq_ignore_ascii_case(&name))
+    })
 }
 
 enum EntryKind {
@@ -430,7 +435,7 @@ pub(crate) fn guarded_read(path: &Path, read: impl FnOnce() -> anyhow::Result<Tr
 }
 
 fn read_metadata_guarded(path: &Path) -> Option<Track> {
-    guarded_read(path, || read_track_metadata(path, 0))
+    guarded_read(path, || crate::tag_scan::read_track_with_cover(path, 0))
 }
 
 /// The tags of one file without its cover: covers are read again and stored after the rows
@@ -843,7 +848,7 @@ mod tests {
         for name in ["Set/a.mp3", "Set/Openers/b.flac", "Set/notes.txt", "loose.wav", "readme.txt"] {
             std::fs::write(dir.join(name), b"x").unwrap();
         }
-        let s = |p: &str| dir.join(p).to_string_lossy().into_owned();
+        let s = |p: &str| dir.join(p.split('/').collect::<PathBuf>()).to_string_lossy().into_owned();
         let dropped = dropped_audio(&[s("Set"), s("loose.wav"), s("readme.txt")]);
         std::fs::remove_dir_all(&dir).unwrap();
         assert_eq!(dropped.len(), 2);
@@ -881,6 +886,16 @@ mod tests {
         expected.sort();
         assert_eq!(found, expected);
         assert_eq!(survey.groups[2].files.len(), 10);
+    }
+
+    #[test]
+    fn dot_files_and_windows_system_folders_are_hidden() {
+        for hidden in [".DS_Store", "._track.mp3", "$RECYCLE.BIN", "$Recycle.Bin", "System Volume Information", "system volume information"] {
+            assert!(is_hidden(Path::new("/Volumes/X").join(hidden).as_path()), "{hidden}");
+        }
+        for shown in ["Music", "System", "$Money.mp3", "Recycle Bin"] {
+            assert!(!is_hidden(Path::new("/Volumes/X").join(shown).as_path()), "{shown}");
+        }
     }
 
     #[test]

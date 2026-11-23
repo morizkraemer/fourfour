@@ -615,7 +615,6 @@ export const library = $state({
         rows: this.volumes.map(v => ({
           kind: 'usb',
           label: v.replace(/\\/g, '/').split('/').pop() || v,
-          status: this.activeVolume === v ? 'online' : 'offline',
           path: v
         })),
       },
@@ -1594,7 +1593,7 @@ async function flushRowPreviews() {
   if (changed) rowPreviewVersion++;
 }
 
-const TRACK_MAP_CHUNK = 2500;
+const TRACK_MAP_CHUNK = 25_000;
 
 function nextTask(): Promise<void> {
   const channel = new MessageChannel();

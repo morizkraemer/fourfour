@@ -32,6 +32,8 @@
   import { sidebarSourceLabel } from '../stores/library.svelte.ts';
   import { dnd, endDrag, stickTargetAt, updatePointer } from '../stores/dnd.svelte.ts';
   import { dropPlaylistsOnStick } from '../stores/organize-drop.svelte.ts';
+  import { statusOfStick, toggleStickProblem } from '../stores/stick-sync.svelte.ts';
+  import StickDot from './StickDot.svelte';
   import {
     sidebarSelection,
     selectSidebarPlaylist,
@@ -94,6 +96,7 @@
     clearSidebarSelection();
     ui.activeSidebarRow = id;
     if (isUsb) {
+      if (ui.openInspectorOnSelect) ui.detailPaneOpen = true;
       selectVolume(path);
     } else {
       selectVolume(null);
@@ -550,6 +553,7 @@
       onHeaderContextMenu={(e) => openSectionMenu(e, 'usb')}
     >
       {#each sidebarData.usb.rows as row}
+        {@const stickStatus = statusOfStick(row.path)}
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
           class="ff-sidebar__drop-wrap"
@@ -559,13 +563,29 @@
           oncontextmenu={(e) => openSourceMenu(e, row.path, row.label, true, row.path)}
         >
           <SidebarRow
-            kind={row.kind}
+            kind="device"
+            icon="usb"
             label={row.label}
-            status={row.status}
             state={ui.activeSidebarRow === row.path ? 'active' : 'rest'}
             onclick={() => handleRowClick(row.path, true, row.path)}
             onOpenInPanel={() => dockOrganizeTarget({ kind: 'usb', id: row.path, label: row.label })}
           />
+          {#if stickStatus.tone === 'problem'}
+            <button
+              type="button"
+              class="ff-sidebar__stick-status ff-sidebar__stick-status--problem"
+              data-stick-status={stickStatus.kind}
+              aria-label="{row.label}: {stickStatus.label}. Show what is going on"
+              title="{stickStatus.label}. Click to see what is going on"
+              onclick={(e) => toggleStickProblem(row.path, e.currentTarget)}
+            >
+              <StickDot tone="problem" label="" />
+            </button>
+          {:else}
+            <span class="ff-sidebar__stick-status" data-stick-status={stickStatus.kind}>
+              <StickDot tone={stickStatus.tone} label={stickStatus.label} />
+            </span>
+          {/if}
         </div>
       {/each}
     </SidebarSection>
@@ -681,6 +701,45 @@
   }
   .ff-sidebar__drop-wrap.drop-after :global(.ff-sbrow) {
     box-shadow: inset 0 -2px 0 var(--ff-accent);
+  }
+  .ff-sidebar__drop-wrap:has(.ff-sidebar__stick-status) {
+    position: relative;
+  }
+  .ff-sidebar__stick-status {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    right: calc(var(--ff-space-6) + 6px);
+    display: flex;
+    align-items: center;
+    pointer-events: none;
+  }
+  .ff-sidebar__drop-wrap:hover .ff-sidebar__stick-status:not(.ff-sidebar__stick-status--problem),
+  .ff-sidebar__drop-wrap:focus-within .ff-sidebar__stick-status:not(.ff-sidebar__stick-status--problem) {
+    display: none;
+  }
+  .ff-sidebar__stick-status--problem {
+    top: 3px;
+    bottom: 3px;
+    right: calc(var(--ff-space-6) + 2px);
+    justify-content: center;
+    width: 20px;
+    padding: 0;
+    border: none;
+    border-radius: var(--ff-radius-md);
+    background: transparent;
+    cursor: pointer;
+    pointer-events: auto;
+  }
+  .ff-sidebar__stick-status--problem:hover {
+    background: var(--ff-elev-hi);
+  }
+  .ff-sidebar__stick-status--problem:focus-visible {
+    outline: 1px solid var(--ff-accent);
+  }
+  .ff-sidebar__drop-wrap:hover .ff-sidebar__stick-status--problem,
+  .ff-sidebar__drop-wrap:has(:global(.ff-sbrow:focus-within)) .ff-sidebar__stick-status--problem {
+    right: calc(var(--ff-space-6) + 22px);
   }
   .ff-sidebar__fill {
     flex: 1 0 24px;

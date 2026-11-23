@@ -35,6 +35,10 @@ async function tabTo(page: Page, matches: () => ReturnType<Page['locator']>) {
   await expect(matches()).toBeFocused();
 }
 
+function framesPassed(page: Page) {
+  return page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+}
+
 test.describe('library list', () => {
   test('F6 skips the collapsed search field in a narrow window and still reaches the list', async ({ smoke: { page } }) => {
     await page.setViewportSize({ width: 900, height: 700 });
@@ -100,6 +104,7 @@ test.describe('library list', () => {
     const menu = page.getByRole('menu');
     await expect(menu).toBeVisible();
     await expect(menu).toBeFocused();
+    await framesPassed(page);
     await page.keyboard.press('ArrowDown');
     await expect(menu.getByRole('menuitem').first()).toBeFocused();
     await page.keyboard.press('ArrowUp');
@@ -129,6 +134,18 @@ test.describe('library list', () => {
     await sidebarRow(page, 'Warmup').click();
     await page.keyboard.press('Space');
     await expect(page.getByRole('button', { name: 'Pause', exact: true })).toBeVisible();
+    await page.keyboard.press('Tab');
+    await expect(page.locator('.ff-xp')).toBeVisible();
+  });
+
+  test('Tab opens and closes the empty player when no track is loaded', async ({ smoke: { page } }) => {
+    await expect(page.locator('.ff-player-compact__meta-title')).toHaveText('No Track Loaded');
+    await page.keyboard.press('Tab');
+    await expect(page.locator('.ff-xp')).toBeVisible();
+    await expect(page.locator('.ff-xp__title')).toHaveText('No Track Loaded');
+    await page.keyboard.press('Tab');
+    await expect(page.locator('.ff-xp')).toHaveCount(0);
+    await rows(page).first().click();
     await page.keyboard.press('Tab');
     await expect(page.locator('.ff-xp')).toBeVisible();
   });
@@ -184,6 +201,7 @@ test.describe('sidebar', () => {
     await page.keyboard.press('Shift+F10');
     const menu = page.getByRole('menu');
     await expect(menu).toBeVisible();
+    await framesPassed(page);
     await page.keyboard.press('ArrowDown');
     await expect(menu.getByRole('menuitem').first()).toBeFocused();
     await page.keyboard.press('Escape');

@@ -5,12 +5,12 @@
   import {
     relocateResult,
     closeHealthDialog,
-    relocateMissing,
     locateTrack,
     checkLibraryAgain,
     showProblemTracks,
   } from '../stores/file-health.svelte.ts';
   import { checkSummary, relocateSummary } from '../lib/fileHealth.ts';
+  import ReconnectPanel from './ReconnectPanel.svelte';
 
   const MAX_NAMES = 5;
 
@@ -52,7 +52,6 @@
             <span class="ff-health__text">
               {fileStatus.missing} {fileStatus.missing === 1 ? 'file is' : 'files are'} missing (moved, or on a drive that is off)
             </span>
-            <Button label="Relocate…" size="small" disabled={fileStatus.relocating} onclick={() => void relocateMissing()} />
           </div>
         {/if}
         {#if fileStatus.error > 0}
@@ -69,6 +68,7 @@
           </div>
         {/if}
       </div>
+      <ReconnectPanel />
       {#if report}
         <section class="ff-health__report" data-relocate-report>
           <h3>Relocate</h3>
@@ -93,7 +93,7 @@
   {/snippet}
   {#snippet actions()}
     <Button label="Check again" variant="ghost" disabled={fileStatus.running} onclick={() => void checkLibraryAgain()} />
-    <Button label="Done" variant="primary" onclick={closeHealthDialog} />
+    <Button label="Done" variant={fileStatus.missing > 0 ? 'default' : 'primary'} onclick={closeHealthDialog} />
   {/snippet}
 </Dialog>
 

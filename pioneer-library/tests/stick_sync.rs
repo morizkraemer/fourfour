@@ -6,7 +6,7 @@ use anyhow::Result;
 use pioneer_library::rekordbox::ImportedCue;
 use pioneer_library::sticks::{self, MANIFEST_REL_PATH};
 use pioneer_library::{
-    LocalLibrary, NoProgress, StickStatus, SyncSelection, SyncTarget, UsbSyncPlan, volume_capacity,
+    KeptSelection, LocalLibrary, NoProgress, StickStatus, SyncSelection, SyncTarget, UsbSyncPlan, volume_capacity,
 };
 use pioneer_usb_writer::models::ExistingUsbState;
 use pioneer_usb_writer::reader;
@@ -46,6 +46,7 @@ fn target(volume: &Path, playlist_ids: &[i64], track_ids: &[i64]) -> SyncTarget 
         selection: SyncSelection::Playlists {
             playlist_ids: playlist_ids.to_vec(),
             track_ids: track_ids.to_vec(),
+            kept: Vec::new(),
         },
     }
 }
@@ -124,6 +125,7 @@ fn plan_says_wont_fit_and_the_write_is_refused() {
 }
 
 #[test]
+#[cfg_attr(windows, ignore = "issue #39: volume_capacity has no Windows implementation")]
 fn capacity_of_a_fake_volume() {
     let dir = TempDir::new().unwrap();
     let capacity = volume_capacity(dir.path()).unwrap();
@@ -307,4 +309,105 @@ fn saving_playlists_keeps_their_ids_and_the_sticks_holding_them() {
         .collect();
     assert_eq!(summary, vec![(fx.peak, "Peak".into(), 3), (added, "New".into(), 1)]);
     assert_eq!(fx.library.stick_contents(stick).unwrap().playlist_ids, vec![fx.peak]);
+}
+
+fn remembered_target(fx: &Fixture, usb: &Path, stick: &str) -> SyncTarget {
+    let contents = fx.library.stick_contents(stick).unwrap();
+    SyncTarget {
+        volume: usb.to_path_buf(),
+        selection: SyncSelection::Playlists {
+            playlist_ids: contents.playlist_ids,
+            track_ids: contents.track_ids,
+            kept: contents
+                .kept_as_is
+                .into_iter()
+                .map(|k| KeptSelection { playlist_id: k.playlist_id, track_ids: k.track_ids })
+                .collect(),
+        },
+    }
+}
+
+fn playlist_titles(usb: &Path, name: &str) -> Vec<String> {
+    let state = state(usb);
+    let playlist = state.playlists.iter().find(|p| p.name == name).expect("playlist is on the stick");
+    playlist
+        .track_ids
+        .iter()
+        .map(|id| state.tracks.iter().find(|t| t.id == *id).expect("playlist track is on the stick").title.clone())
+        .collect()
+}
+
+#[test]
+fn kept_playlist_is_written_from_the_sticks_own_list_until_it_follows_again() {
+    let fx = fixture(6);
+    let usb = fake_stick(&fx, "KEPT");
+    let stick = "stick-kept";
+    let title = |i: usize| library_title(&fx, fx.ids[i]);
+    fx.library.add_stick_playlists(stick, &[fx.warmup]).unwrap();
+
+    fx.library.keep_stick_playlist(stick, fx.warmup, &fx.ids[..2]).unwrap();
+    fx.library.set_playlist_tracks(fx.warmup, &fx.ids[..4]).unwrap();
+    sync(&fx, remembered_target(&fx, &usb, stick));
+    assert_eq!(playlist_titles(&usb, "Warmup"), vec![title(0), title(1)], "the library grew, the kept playlist did not");
+
+    fx.library.keep_stick_playlist(stick, fx.warmup, &[fx.ids[1]]).unwrap();
+    let removal = plan(&fx, remembered_target(&fx, &usb, stick), PLENTY);
+    assert!(removal.add.is_empty());
+    assert_eq!(removal.remove.iter().map(|t| t.title.clone()).collect::<Vec<_>>(), vec![title(0)]);
+    sync(&fx, remembered_target(&fx, &usb, stick));
+    assert_eq!(playlist_titles(&usb, "Warmup"), vec![title(1)]);
+
+    fx.library.keep_stick_playlist(stick, fx.warmup, &[fx.ids[1], fx.ids[0]]).unwrap();
+    sync(&fx, remembered_target(&fx, &usb, stick));
+    assert_eq!(playlist_titles(&usb, "Warmup"), vec![title(1), title(0)], "the stick keeps its own order");
+    assert_eq!(
+        fx.library.get_playlist(fx.warmup).unwrap().unwrap().track_ids,
+        fx.ids[..4].iter().map(|&id| id as u32).collect::<Vec<_>>(),
+        "edits on the stick never change the library playlist"
+    );
+
+    fx.library.follow_stick_playlist(stick, fx.warmup).unwrap();
+    let follow = plan(&fx, remembered_target(&fx, &usb, stick), PLENTY);
+    assert_eq!(follow.add.len(), 2);
+    sync(&fx, remembered_target(&fx, &usb, stick));
+    assert_eq!(playlist_titles(&usb, "Warmup"), vec![title(0), title(1), title(2), title(3)]);
+}
+
+#[test]
+fn saving_playlists_keeps_the_kept_lists_of_sticks() {
+    let fx = fixture(6);
+    let stick = "stick-a";
+    fx.library.add_stick_playlists(stick, &[fx.peak]).unwrap();
+    fx.library.keep_stick_playlist(stick, fx.peak, &fx.ids[2..3]).unwrap();
+
+    fx.library
+        .replace_playlists(&[playlist(fx.warmup, "Warmup", &fx.ids[..1]), playlist(fx.peak, "Peak", &fx.ids[2..5])])
+        .unwrap();
+
+    let kept = fx.library.stick_contents(stick).unwrap().kept_as_is;
+    assert_eq!(kept.len(), 1);
+    assert_eq!(kept[0].track_ids, fx.ids[2..3].to_vec());
+}
+
+#[test]
+fn library_without_the_kept_table_gains_it_on_open() {
+    let workspace = TempDir::new().unwrap();
+    let db_path = workspace.path().join("library.db");
+    let playlist = {
+        let library = LocalLibrary::open(&db_path).unwrap();
+        let playlist = library.create_playlist("Warmup").unwrap();
+        library.add_stick_playlists("stick-old", &[playlist]).unwrap();
+        playlist
+    };
+    {
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        conn.execute_batch("DROP TABLE stick_kept_playlists;").unwrap();
+    }
+
+    let library = LocalLibrary::open(&db_path).unwrap();
+    let contents = library.stick_contents("stick-old").unwrap();
+    assert_eq!(contents.playlist_ids, vec![playlist]);
+    assert!(contents.kept_as_is.is_empty());
+    assert_eq!(library.keep_stick_playlist("stick-old", playlist, &[]).unwrap(), 1);
+    assert_eq!(library.stick_contents("stick-old").unwrap().kept_as_is.len(), 1);
 }

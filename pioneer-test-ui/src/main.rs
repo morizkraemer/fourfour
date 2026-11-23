@@ -9,15 +9,19 @@ mod analysis_run;
 mod artwork_thumbs;
 mod app_log;
 mod backup_commands;
+mod duplicate_commands;
 mod band_analysis;
 mod command_error;
+mod data_migration;
 mod dto;
 mod early_state;
 mod file_health;
 mod heap;
 mod import_plan;
 mod perf_probe;
+mod reconnect_commands;
 mod playback;
+mod playlist_export_commands;
 mod recovery_commands;
 #[cfg(test)]
 #[allow(dead_code)]
@@ -1468,7 +1472,10 @@ fn main() {
         self_check::run_and_exit();
     }
     let context = tauri::generate_context!();
-    app_log::start_early(&context.config().identifier);
+    let identifier = context.config().identifier.clone();
+    let migration = data_migration::migrate_legacy_data(&identifier, data_migration::Os::current(), &|name| std::env::var_os(name));
+    app_log::start_early(&identifier);
+    data_migration::log_migration(&migration);
     perf_probe::start();
     let app = perf_probe::install(tauri::Builder::default()) // v0.1
         .plugin(tauri_plugin_dialog::init())
@@ -1490,20 +1497,36 @@ fn main() {
             write_usb,
             sync_usb_many,
             stick_commands::get_stick,
+            stick_commands::stick_track_path,
             stick_commands::stick_add_tracks,
             stick_commands::stick_remove_tracks,
             stick_commands::stick_add_playlists,
             stick_commands::stick_remove_playlists,
+            stick_commands::stick_set_keep_updated,
+            stick_commands::stick_set_playlist_tracks,
             stick_commands::get_volume_capacity,
             stick_commands::plan_usb_sync,
+            duplicate_commands::list_duplicate_groups,
+            duplicate_commands::apply_duplicate_merges,
+            duplicate_commands::list_duplicate_archive,
+            duplicate_commands::restore_duplicate_merge,
             file_health::check_library_files,
             file_health::get_library_health,
             file_health::relocate_missing_in_folder,
             file_health::locate_track_file,
+            reconnect_commands::find_reconnect_candidates,
+            reconnect_commands::apply_reconnects,
+            reconnect_commands::preview_relocate_folder,
+            reconnect_commands::apply_relocate_folder,
+            reconnect_commands::undo_relocate_folder,
+            reconnect_commands::last_folder_relocation,
             backup_commands::get_backup_status,
             backup_commands::export_backup,
             backup_commands::read_backup,
             backup_commands::restore_backup,
+            playlist_export_commands::export_playlist,
+            playlist_export_commands::playlist_export_file_name,
+            playlist_export_commands::playlist_tracklist,
             remove_tracks,
             set_test_cues,
             get_mounted_volumes,
@@ -1618,7 +1641,9 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::artwork_thumbs::artwork_thumbnail;
-    use super::{analysis_start_error, eject_failure, validated_reveal_path};
+    #[cfg(not(target_os = "windows"))]
+    use super::eject_failure;
+    use super::{analysis_start_error, validated_reveal_path};
     use crate::analysis_backend;
     use crate::command_error::{CommandError, ErrorKind};
     use std::path::PathBuf;
@@ -1661,10 +1686,25 @@ mod tests {
             ],
         );
         assert_off_main_thread(include_str!("backup_commands.rs"), &["read_backup"]);
+        assert_off_main_thread(
+            include_str!("playlist_export_commands.rs"),
+            &["export_playlist", "playlist_export_file_name", "playlist_tracklist"],
+        );
         assert_off_main_thread(include_str!("file_health.rs"), &["locate_track_file"]);
         assert_off_main_thread(
+            include_str!("reconnect_commands.rs"),
+            &[
+                "find_reconnect_candidates",
+                "apply_reconnects",
+                "preview_relocate_folder",
+                "apply_relocate_folder",
+                "undo_relocate_folder",
+                "last_folder_relocation",
+            ],
+        );
+        assert_off_main_thread(
             include_str!("stick_commands.rs"),
-            &["get_stick", "stick_add_tracks", "stick_remove_tracks", "stick_add_playlists", "stick_remove_playlists", "get_volume_capacity"],
+            &["get_stick", "stick_track_path", "stick_add_tracks", "stick_remove_tracks", "stick_add_playlists", "stick_remove_playlists", "stick_set_keep_updated", "stick_set_playlist_tracks", "get_volume_capacity"],
         );
     }
 
@@ -1802,6 +1842,7 @@ mod tests {
         assert_eq!(error.message, "Analysis failed for all 4 tracks — see debug log");
     }
 
+    #[cfg(not(target_os = "windows"))]
     #[test]
     fn eject_output_that_says_busy_is_stick_busy() {
         for stderr in ["Error unmounting: target is busy", "umount: /media/x: device is in use", "Volume failed to eject: dissented by PID 12"] {

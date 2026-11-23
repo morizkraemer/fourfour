@@ -2,7 +2,7 @@ import { library, ejectVolume } from '../stores/library.svelte.ts';
 import { isStickSyncBusy, syncStick } from '../stores/stick-sync.svelte.ts';
 import { dockOrganizeTarget, ui } from '../stores/ui.svelte.ts';
 import { ALL_COLUMN_KEYS, getLayout, resolveLayoutKind, resetColumns, toggleColumnVisibility } from '../stores/table-columns.svelte.ts';
-import { stickLabel } from '../lib/topbarStatus.ts';
+import { stickLabel } from '../lib/stickStatus.ts';
 import type { PaletteActionSource } from './palette-model.ts';
 
 const STICK_WORDS = ['usb', 'drive', 'device'];

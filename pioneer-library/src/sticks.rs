@@ -40,11 +40,13 @@ pub struct StickManifest {
     pub files: Vec<OwnedFile>,
     #[serde(default)]
     pub last_sync: Option<LastSync>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub v2: Option<pioneer_usb_writer::stick::plan::Ownership>,
 }
 
 impl StickManifest {
     fn fresh() -> Self {
-        Self { version: MANIFEST_VERSION, stick_id: new_stick_id(), files: Vec::new(), last_sync: None }
+        Self { version: MANIFEST_VERSION, stick_id: new_stick_id(), files: Vec::new(), last_sync: None, v2: None }
     }
 
     pub fn owns(&self, usb_path: &str) -> bool {
@@ -115,12 +117,21 @@ fn new_stick_id() -> String {
     format!("{:016x}{:016x}", halves[0], halves[1])
 }
 
+/// A playlist on a stick that no longer follows the library: the stick's own track list.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KeptPlaylist {
+    pub playlist_id: i64,
+    pub as_of: String,
+    pub track_ids: Vec<i64>,
+}
+
 /// What the library remembers for one stick.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StickContents {
     pub stick_id: Option<String>,
     pub track_ids: Vec<i64>,
     pub playlist_ids: Vec<i64>,
+    pub kept_as_is: Vec<KeptPlaylist>,
 }
 
 impl LocalLibrary {
@@ -145,7 +156,55 @@ impl LocalLibrary {
             playlist_ids: ids(
                 "SELECT playlist_id FROM stick_playlists WHERE stick_id = ?1 ORDER BY position",
             )?,
+            kept_as_is: self.kept_stick_playlists(stick_id)?,
         })
+    }
+
+    fn kept_stick_playlists(&self, stick_id: &str) -> Result<Vec<KeptPlaylist>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT k.playlist_id, k.as_of, k.track_ids FROM stick_kept_playlists k
+             JOIN stick_playlists p ON p.stick_id = k.stick_id AND p.playlist_id = k.playlist_id
+             WHERE k.stick_id = ?1 ORDER BY p.position",
+        )?;
+        let rows = stmt.query_map([stick_id], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+        })?;
+        let mut kept = Vec::new();
+        for row in rows {
+            let (playlist_id, as_of, track_ids) = row?;
+            let track_ids = serde_json::from_str(&track_ids)
+                .with_context(|| format!("Cannot read the kept track list of playlist {playlist_id}"))?;
+            kept.push(KeptPlaylist { playlist_id, as_of, track_ids });
+        }
+        Ok(kept)
+    }
+
+    /// Gives a playlist on the stick its own track list, so it stops following the library.
+    /// The date it was first kept stays when the list is edited later. Returns 1 when the
+    /// stored list changed, 0 when the playlist is not on the stick or nothing changed.
+    pub fn keep_stick_playlist(&self, stick_id: &str, playlist_id: i64, track_ids: &[i64]) -> Result<usize> {
+        let on_stick: bool = self.conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM stick_playlists WHERE stick_id = ?1 AND playlist_id = ?2)",
+            params![stick_id, playlist_id],
+            |row| row.get(0),
+        )?;
+        if !on_stick {
+            return Ok(0);
+        }
+        let list = serde_json::to_string(track_ids)?;
+        Ok(self.conn.execute(
+            "INSERT INTO stick_kept_playlists (stick_id, playlist_id, as_of, track_ids) VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(stick_id, playlist_id) DO UPDATE SET track_ids = ?4 WHERE track_ids <> ?4",
+            params![stick_id, playlist_id, chrono::Utc::now().to_rfc3339(), list],
+        )?)
+    }
+
+    /// Makes a playlist on the stick follow the library again.
+    pub fn follow_stick_playlist(&self, stick_id: &str, playlist_id: i64) -> Result<usize> {
+        Ok(self.conn.execute(
+            "DELETE FROM stick_kept_playlists WHERE stick_id = ?1 AND playlist_id = ?2",
+            params![stick_id, playlist_id],
+        )?)
     }
 
     /// Appends the tracks the stick does not hold yet; returns how many were added.
@@ -163,6 +222,7 @@ impl LocalLibrary {
     }
 
     pub fn remove_stick_playlists(&self, stick_id: &str, playlist_ids: &[i64]) -> Result<usize> {
+        self.delete_ids("stick_kept_playlists", "playlist_id", stick_id, playlist_ids)?;
         self.delete_ids("stick_playlists", "playlist_id", stick_id, playlist_ids)
     }
 
@@ -256,5 +316,42 @@ mod tests {
 
         lib.remove_track(c).unwrap();
         assert_eq!(lib.stick_contents("s1").unwrap().track_ids, vec![b]);
+    }
+
+    #[test]
+    fn kept_playlist_holds_its_own_list_until_it_follows_again() {
+        let lib = LocalLibrary::open_in_memory().unwrap();
+        let track = |name: &str| lib.add_track(&crate::tests::make_track(name, &format!("/music/{name}.mp3"))).unwrap();
+        let (a, b, c) = (track("a"), track("b"), track("c"));
+        let warmup = lib.create_playlist("Warmup").unwrap();
+        lib.set_playlist_tracks(warmup, &[a, b, c]).unwrap();
+
+        assert_eq!(lib.keep_stick_playlist("s1", warmup, &[a, b, c]).unwrap(), 0, "not on the stick yet");
+        lib.add_stick_playlists("s1", &[warmup]).unwrap();
+        assert!(lib.stick_contents("s1").unwrap().kept_as_is.is_empty());
+
+        assert_eq!(lib.keep_stick_playlist("s1", warmup, &[a, b, c]).unwrap(), 1);
+        let kept = lib.stick_contents("s1").unwrap().kept_as_is;
+        assert_eq!(kept.len(), 1);
+        assert_eq!((kept[0].playlist_id, kept[0].track_ids.clone()), (warmup, vec![a, b, c]));
+        let as_of = kept[0].as_of.clone();
+
+        lib.set_playlist_tracks(warmup, &[a]).unwrap();
+        assert_eq!(lib.stick_contents("s1").unwrap().kept_as_is[0].track_ids, vec![a, b, c], "library edits do not reach it");
+
+        assert_eq!(lib.keep_stick_playlist("s1", warmup, &[c, a]).unwrap(), 1);
+        assert_eq!(lib.keep_stick_playlist("s1", warmup, &[c, a]).unwrap(), 0);
+        let edited = lib.stick_contents("s1").unwrap().kept_as_is;
+        assert_eq!(edited[0].track_ids, vec![c, a]);
+        assert_eq!(edited[0].as_of, as_of);
+        assert!(lib.stick_contents("other").unwrap().kept_as_is.is_empty());
+
+        assert_eq!(lib.follow_stick_playlist("s1", warmup).unwrap(), 1);
+        assert!(lib.stick_contents("s1").unwrap().kept_as_is.is_empty());
+
+        lib.keep_stick_playlist("s1", warmup, &[b]).unwrap();
+        lib.remove_stick_playlists("s1", &[warmup]).unwrap();
+        lib.add_stick_playlists("s1", &[warmup]).unwrap();
+        assert!(lib.stick_contents("s1").unwrap().kept_as_is.is_empty(), "taking it off the stick forgets the kept list");
     }
 }

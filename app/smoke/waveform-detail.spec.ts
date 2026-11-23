@@ -83,3 +83,50 @@ test('without a high-resolution series the zoom view draws the analysis columns'
   await expandPaused(page);
   await expect(page.locator('.ff-xp .waveform-display__zoom')).toHaveAttribute('data-bands', 'columns');
 });
+
+async function enableProgressiveDetail(page: Page, on: boolean) {
+  await page.evaluate((flag) => (flag ? localStorage.setItem('ff.progressiveDetail', '1') : localStorage.removeItem('ff.progressiveDetail')), on);
+  await page.reload();
+  await page.locator('[data-track-row]').first().waitFor();
+}
+
+async function msToFirstZoomPaint(page: Page, detailMs: number) {
+  await page.evaluate(() => ((window as unknown as SmokeWindow).__smokeDetail = 'hold'));
+  await loadByDoubleClick(page, TRACK);
+  const zoom = page.locator('.ff-xp .waveform-display__zoom');
+  await page.locator('.ff-player-compact__expand-btn').click();
+  const started = Date.now();
+  await expect(zoom).toBeVisible();
+  const release = setTimeout(() => void page.evaluate(() => (window as unknown as SmokeWindow).__smokeReleaseDetail?.()), detailMs);
+  await expect(zoom).not.toHaveAttribute('data-bands', /^(pending|none)$/);
+  const painted = Date.now() - started;
+  clearTimeout(release);
+  await page.evaluate(() => (window as unknown as SmokeWindow).__smokeReleaseDetail?.());
+  await expect(zoom).toHaveAttribute('data-bands', 'detail');
+  return painted;
+}
+
+test('progressive detail shows the stored columns while the series is measured and swaps in the series in place', async ({ smoke: { page } }) => {
+  await enableProgressiveDetail(page, true);
+  await page.evaluate(() => ((window as unknown as SmokeWindow).__smokeDetail = 'hold'));
+  await expandPaused(page);
+  const zoom = page.locator('.ff-xp .waveform-display__zoom');
+  await expect(zoom).toHaveAttribute('data-bands', 'columns');
+  const box = await zoom.boundingBox();
+  const shots = process.env.FF_SHOTS_DIR;
+  if (shots) await page.locator('.ff-xp__wave').screenshot({ path: `${shots}/perf-detail-preview.png` });
+
+  await page.evaluate(() => (window as unknown as SmokeWindow).__smokeReleaseDetail?.());
+  await expect(zoom).toHaveAttribute('data-bands', 'detail');
+  expect(await zoom.boundingBox()).toEqual(box);
+  if (shots) await page.locator('.ff-xp__wave').screenshot({ path: `${shots}/perf-detail-final.png` });
+});
+
+test('time to the first painted zoom waveform with a cold detail of 450 ms, progressive detail off and on', async ({ smoke: { page } }) => {
+  const COLD_DETAIL_MS = 450;
+  const off = await msToFirstZoomPaint(page, COLD_DETAIL_MS);
+  await enableProgressiveDetail(page, true);
+  const on = await msToFirstZoomPaint(page, COLD_DETAIL_MS);
+  console.log(`first painted zoom waveform: off ${off} ms, on ${on} ms`);
+  expect(on).toBeLessThan(off);
+});

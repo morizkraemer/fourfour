@@ -1,0 +1,47 @@
+{
+  "id": "q61-reconnect",
+  "title": "Reconnect moved files",
+  "question": "Moved files are found by audio content, not name. Find moved files… scans a folder; unclear matches ask you to pick. Relocate folder… remaps a whole old folder to a new one, with Undo. Three buttons under the missing-files line (Relocate…, Find moved files…, Relocate folder…): too many? Rec: keep Find moved files, fold the other two into one 'More' menu.",
+  "url": "/lab.html",
+  "media": "/data/cards/q61-reconnect/media/reconnect-1-check-dialog.png",
+  "gallery": [
+    {
+      "url": "/data/cards/q61-reconnect/media/reconnect-1-check-dialog.png",
+      "label": "check"
+    },
+    {
+      "url": "/data/cards/q61-reconnect/media/reconnect-2-find-moved-result.png",
+      "label": "found"
+    },
+    {
+      "url": "/data/cards/q61-reconnect/media/reconnect-3-relocate-form.png",
+      "label": "form"
+    },
+    {
+      "url": "/data/cards/q61-reconnect/media/reconnect-4-relocated-undo.png",
+      "label": "undo"
+    }
+  ],
+  "options": [
+    {
+      "key": "check",
+      "label": "Check dialog"
+    },
+    {
+      "key": "found",
+      "label": "Find moved result"
+    },
+    {
+      "key": "form",
+      "label": "Relocate folder"
+    },
+    {
+      "key": "undo",
+      "label": "After relocate"
+    }
+  ],
+  "rank": 100,
+  "status": "backlog",
+  "round": 1,
+  "created": "2026-11-21T03:44:14.946Z"
+}

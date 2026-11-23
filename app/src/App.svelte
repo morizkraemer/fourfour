@@ -19,7 +19,7 @@
   import AppStatusBar   from './modules/AppStatusBar.svelte';
   import OrganizePanel  from './modules/OrganizePanel.svelte';
   import LazyMount from './lib/LazyMount.svelte';
-  import { appDialogs, inspector, stickView } from './lib/lazy-views.ts';
+  import { appDialogs, inspector, stickInspector, stickProblemPopover, stickView } from './lib/lazy-views.ts';
   import { firstScreenShown, releaseAfterFallback } from './lib/afterFirstScreen.ts';
   import { announcer } from './stores/announce.svelte.ts';
   import { initFileHealth } from './stores/file-health.svelte.ts';
@@ -44,6 +44,9 @@
     confirmAnalysisPrompt,
     dismissAnalysisPrompt,
   } from './stores/library.svelte.ts';
+  import { sticks } from './stores/sticks.svelte.ts';
+  import { watchStick, unwatchSticksExcept, stickProblemView } from './stores/stick-sync.svelte.ts';
+  import { stickSelection } from './lib/stickEdits.ts';
   import { fileDrop, hoverFileDrop, clearFileDropHover, importDroppedPaths } from './stores/file-drop.svelte.ts';
   import { selectionCount } from './stores/selection.svelte.ts';
   import { getIsTauri } from './services/tauri.svelte.ts';
@@ -60,7 +63,17 @@
 
 
   let stickOnLeft = $derived(library.volumes.includes(ui.activeSidebarRow) ? ui.activeSidebarRow : null);
-  let inspectorVisible = $derived(ui.detailPaneOpen && selectionCount() > 0 && !ui.organize.expanded);
+  let inspectorVisible = $derived(ui.detailPaneOpen && (selectionCount() > 0 || !!stickOnLeft) && !ui.organize.expanded);
+
+  $effect(() => {
+    unwatchSticksExcept(library.volumes);
+    for (const volume of library.volumes) {
+      const contents = sticks.byPath[volume];
+      if (!contents) continue;
+      const followed = contents.playlist_ids.map((id) => library.playlists.find((p) => p.id === id)?.track_ids ?? []);
+      watchStick(volume, JSON.stringify([stickSelection(contents), followed]));
+    }
+  });
 
   function yieldsToFocusedControl(e) {
     if (e.ctrlKey || e.metaKey || e.altKey) return false;
@@ -147,7 +160,11 @@
               onCommit={() => commitPanelWidth('inspector')}
               onReset={() => resetPanelWidth('inspector')}
             />
-            <LazyMount view={inspector} />
+            {#if stickOnLeft}
+              <LazyMount view={stickInspector} props={{ volumePath: stickOnLeft }} />
+            {:else}
+              <LazyMount view={inspector} />
+            {/if}
           </div>
         {/if}
       <div
@@ -171,6 +188,7 @@
 <div class="ff-sr-only" role="status" aria-live="polite" aria-atomic="true" data-live-region>{#key announcer.nonce}{announcer.message}{/key}</div>
 
 <LazyMount view={appDialogs} needed={ui.settingsOpen || ui.paletteOpen} />
+<LazyMount view={stickProblemPopover} needed={stickProblemView.volumePath !== null} />
 
 {#if library.showAnalysisPrompt}
   <Dialog

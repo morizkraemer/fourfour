@@ -1,11 +1,100 @@
 use anyhow::{Context, Result};
+use lofty::config::ParseOptions;
+use lofty::file::FileType;
 use lofty::prelude::*;
 use lofty::probe::Probe;
 use lofty::tag::ItemKey;
+use std::fs::File;
+use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::path::Path;
 use walkdir::WalkDir;
 
 use crate::models::Track;
+
+const MAX_FLAC_METADATA_BLOCKS: usize = 4096;
+const MAX_MP4_ATOMS: usize = 100_000;
+const MAX_MP4_DEPTH: usize = 12;
+const MP4_CONTAINERS: [&[u8; 4]; 7] = [b"moov", b"trak", b"mdia", b"minf", b"udta", b"meta", b"ilst"];
+
+fn check_flac_blocks<R: Read + Seek>(file: &mut R) -> Result<()> {
+    let mut head = [0u8; 10];
+    if file.read_exact(&mut head).is_err() {
+        return Ok(());
+    }
+    let mut start = 0u64;
+    if &head[..3] == b"ID3" {
+        start = 10 + ((head[6] as u64) << 21 | (head[7] as u64) << 14 | (head[8] as u64) << 7 | head[9] as u64);
+    }
+    let mut magic = [0u8; 4];
+    if file.seek(SeekFrom::Start(start)).is_err() || file.read_exact(&mut magic).is_err() || &magic != b"fLaC" {
+        return Ok(());
+    }
+    for _ in 0..MAX_FLAC_METADATA_BLOCKS {
+        let mut header = [0u8; 4];
+        if file.read_exact(&mut header).is_err() || header[0] & 0x80 != 0 {
+            return Ok(());
+        }
+        let len = (header[1] as i64) << 16 | (header[2] as i64) << 8 | header[3] as i64;
+        file.seek(SeekFrom::Current(len))?;
+    }
+    anyhow::bail!("FLAC has more than {MAX_FLAC_METADATA_BLOCKS} metadata blocks")
+}
+
+fn walk_mp4_atoms<R: Read + Seek>(file: &mut R, mut at: u64, end: u64, depth: usize, count: &mut usize) -> Result<()> {
+    while at + 8 <= end {
+        *count += 1;
+        if *count > MAX_MP4_ATOMS {
+            anyhow::bail!("MP4 has more than {MAX_MP4_ATOMS} atoms");
+        }
+        file.seek(SeekFrom::Start(at))?;
+        let mut header = [0u8; 8];
+        file.read_exact(&mut header)?;
+        let size = u32::from_be_bytes(header[..4].try_into().unwrap()) as u64;
+        let kind: [u8; 4] = header[4..].try_into().unwrap();
+        let (header_len, size) = match size {
+            0 => (8, end - at),
+            1 => {
+                let mut large = [0u8; 8];
+                file.read_exact(&mut large)?;
+                (16, u64::from_be_bytes(large))
+            }
+            n => (8, n),
+        };
+        if size < header_len {
+            return Ok(());
+        }
+        let atom_end = at.saturating_add(size).min(end);
+        if depth < MAX_MP4_DEPTH && MP4_CONTAINERS.contains(&&kind) {
+            let body = at + header_len + if &kind == b"meta" { 4 } else { 0 };
+            walk_mp4_atoms(file, body, atom_end, depth + 1, count)?;
+        }
+        at = atom_end;
+    }
+    Ok(())
+}
+
+pub fn check_tag_structure(file: &mut File) -> Result<()> {
+    let end = file.metadata()?.len();
+    let checked = check_tag_structure_in(&mut BufReader::new(&mut *file), end);
+    file.seek(SeekFrom::Start(0))?;
+    checked
+}
+
+fn check_tag_structure_in<R: Read + Seek>(file: &mut R, end: u64) -> Result<()> {
+    let mut magic = [0u8; 8];
+    let got = file.read(&mut magic)?;
+    file.seek(SeekFrom::Start(0))?;
+    if got < 8 {
+        return Ok(());
+    }
+    if &magic[4..8] == b"ftyp" {
+        walk_mp4_atoms(file, 0, end, 0, &mut 0)
+    } else if &magic[..3] == b"ID3" || &magic[..4] == b"fLaC" {
+        check_flac_blocks(file)
+    } else {
+        Ok(())
+    }
+}
 
 pub const AUDIO_EXTENSIONS: &[&str] = &["mp3", "flac", "wav", "aiff", "aif", "m4a", "aac"];
 
@@ -129,10 +218,25 @@ pub fn scan_files_with_progress(paths: &[std::path::PathBuf], on_file: &mut dyn 
 /// The USB-relative audio path is derived as `/Contents/<artist>/<filename>`,
 /// with path-unsafe characters in the artist and filename replaced by `_`.
 pub fn read_track_metadata(path: &Path, id: u32) -> Result<Track> {
-    let tagged_file = Probe::open(path)
-        .with_context(|| format!("Failed to open {}", path.display()))?
-        .read()
-        .with_context(|| format!("Failed to read tags from {}", path.display()))?;
+    let mut file = File::open(path).with_context(|| format!("Failed to open {}", path.display()))?;
+    check_tag_structure(&mut file).with_context(|| format!("Refusing to read tags from {}", path.display()))?;
+    track_from_reader(&mut BufReader::new(file), ParseOptions::new(), path, id)
+}
+
+pub trait ReadSeek: Read + Seek {}
+
+impl<R: Read + Seek> ReadSeek for R {}
+
+/// Builds a [`Track`] from `reader`, which holds the file at `path`: the file type comes from
+/// the extension, as for [`read_track_metadata`]. `options` decide what lofty reads (for
+/// example `read_cover_art(false)` leaves `artwork` empty). Not generic, so lofty is compiled
+/// once in this crate (optimised even in dev builds).
+pub fn track_from_reader(reader: &mut dyn ReadSeek, options: ParseOptions, path: &Path, id: u32) -> Result<Track> {
+    let mut probe = Probe::new(reader).options(options);
+    if let Some(file_type) = FileType::from_path(path) {
+        probe = probe.set_file_type(file_type);
+    }
+    let tagged_file = probe.read().with_context(|| format!("Failed to read tags from {}", path.display()))?;
 
     let properties = tagged_file.properties();
     let duration = properties.duration();
@@ -239,4 +343,57 @@ fn sanitize_path_component(s: &str) -> String {
             _ => c,
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn mp4_with_free_atoms(count: usize) -> Vec<u8> {
+        let free: Vec<u8> = (0..count).flat_map(|_| [0, 0, 0, 8, b'f', b'r', b'e', b'e']).collect();
+        let udta = [&((free.len() + 8) as u32).to_be_bytes()[..], b"udta", &free].concat();
+        let moov = [&((udta.len() + 8) as u32).to_be_bytes()[..], b"moov", &udta].concat();
+        [&[0, 0, 0, 16][..], b"ftypM4A     ", &moov].concat()
+    }
+
+    fn flac_with_blocks(count: usize) -> Vec<u8> {
+        let mut out = b"fLaC".to_vec();
+        for i in 0..count {
+            out.extend_from_slice(&[if i + 1 == count { 0x82 } else { 0x02 }, 0, 0, 4, b'f', b'u', b'z', b'z']);
+        }
+        out
+    }
+
+    fn check(name: &str, bytes: &[u8]) -> Result<()> {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(name);
+        std::fs::write(&path, bytes).unwrap();
+        check_tag_structure(&mut File::open(&path).unwrap())
+    }
+
+    #[test]
+    fn flac_with_thousands_of_metadata_blocks_is_refused() {
+        assert!(check("a.flac", &flac_with_blocks(MAX_FLAC_METADATA_BLOCKS + 50)).is_err());
+        assert!(check("b.flac", &flac_with_blocks(20)).is_ok());
+    }
+
+    #[test]
+    fn id3_tag_claiming_more_than_the_file_is_not_an_error_here() {
+        let bytes = [&b"ID3\x04\x00\x00\x7f\x7f\x7f\x7f"[..], &[0u8; 20]].concat();
+        assert!(check("d.mp3", &bytes).is_ok());
+    }
+
+    #[test]
+    fn mp4_with_a_flood_of_atoms_is_refused() {
+        assert!(check("a.m4a", &mp4_with_free_atoms(MAX_MP4_ATOMS + 50)).is_err());
+        assert!(check("b.m4a", &mp4_with_free_atoms(200)).is_ok());
+    }
+
+    #[test]
+    fn bogus_atom_sizes_do_not_loop_or_panic() {
+        for size in [0u32, 1, 4, 7, 8, 0xffff_ffff] {
+            let bytes = [&[0, 0, 0, 16][..], b"ftypM4A     ", &size.to_be_bytes(), b"moov", &[0u8; 64]].concat();
+            assert!(check("c.m4a", &bytes).is_ok(), "size {size}");
+        }
+    }
 }
