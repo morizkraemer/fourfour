@@ -25,7 +25,12 @@ AGENTS.md ## Unattended (autonomy tight). No Tauri windows, audio output or USB 
 1. Stick UI round 3 (Q68, running): review the lab card when it lands - branch: stick-ui-r3
 2. FF-GOLDEN: small Rekordbox export on INTENSO (5 tracks; exports A, A2, B, copied off between each). Gates the writer v2 byte diff - branch: writer-v2 (in master)
 3. Mo's CDJ-3000 test of writer v2: steps still to write. rec: I write them, you OK filing them as an issue - branch: master
-4. Security review findings (2 medium: real track paths in public manifests; hostnames/notes in public STATE/journal). rec: untrack the corpus manifests first - report: ~/dev/pm/reviews/2026-11-23-security-fourfour.md
+4. Security review (public repo, report ~/dev/pm/reviews/2026-11-23-security-fourfour.md; no fixes run, ranked):
+   a. Corpus manifests with real track paths: untracked + pushed 2026-11-23 per Merlin; still in history. rec: leave history unless the list matters (rewrite = Mo force-push)
+   b. AGENTS.md, STATE, journal, state-archive, beta checklist are public (hostnames, notes, budgets). rec: move orchestrator docs to a private repo
+   c. Lab card media (33 png/mp4) not checked for personal library content. rec: a worker views and lists any to replace
+   d. /Users/merlinkraemer and /home/merlin paths in tests, scripts, docs. rec: neutral paths over time
+   e. Draft DMGs may embed build paths. rec: check before publishing any release
 6. `.claude/settings.local.json` allows `git push *`, bypassing the push ask. rec: remove that allow line (Merlin edits it)
 15. CI on 3 OSes never run on GitHub. rec: OK to push r63-ci-v3 for a first run - branch: r63-ci-v3 f0827da
 16. Bar 1 rule (in master): 5 regressions never listened to. rec: listen on the Mac - branch: master
