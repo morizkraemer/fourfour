@@ -878,3 +878,4 @@
 2026-11-22 07:09 orchestrator briefs untracked + gitignored (1272eb6), pushed to master per Merlin ('1'); history left as is
 2026-11-22 08:16 orchestrator genre-r1 done [60cd1f9]: licence-clean FMA model (817 CC BY/CC0 clips) loses to BPM floor on Beatport test (acc 0.23 vs 0.38 on 12 DJ classes); same features trained on Beatport tune reach 0.50 (not shippable) -> data is the bottleneck; 5 classes have no clean training data; flag stays off
 2026-11-23 02:56 orchestrator merged rc 932dcc3 (build 2148, all green) into master 5b66095 per Merlin ('merge everything thats already tested to master'); app code = installed build 2148; not pushed. Genre r2 credit runs Q66 (beat features, opus $10) + Q67 (free data, sonnet $10) running
+2026-11-23 03:29 orchestrator pushed master per Merlin ('Push master'): 1272eb6..f324215
