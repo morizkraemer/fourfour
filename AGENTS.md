@@ -186,6 +186,6 @@ run limits: ≤2 workers (≤3 until 2026-11-30 when it is faster and `free -m` 
 
 This project runs as one long-lived orchestrator thread (see the `orchestrator` skill), on the `dev` box (Proxmox VM on `lab`) as a Claude Desktop SSH session in this folder. Live state: `docs/STATE.md`; history: `docs/journal.md`; rulebook: `## Unattended` above.
 
-- Workers are background subagents in worktrees; capped `claude -p` credit runs only for `[drain]` entries.
+- Workers are capped `orch-worker` credit runs (API), each with a `--budget` safety stop; the only spend limit is one shared $450 per calendar month across all projects, enforced in orch-worker (Merlin 2026-11-23). The seat only orchestrates.
 - Hard gates are the `permissions.ask` rules in `.claude/settings.json`; only the orchestrator runs them, in the foreground. Everything else Merlin decides goes to STATE.md "Waiting on Merlin" with a recommendation and a branch.
 - Merlin keeps roadmap, anything user-visible, outward actions and taste.

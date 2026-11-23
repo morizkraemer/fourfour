@@ -14,7 +14,7 @@ USB sync: only chosen playlists go on a stick; plug in = sync; ask only on remov
 Public macOS beta: a .dmg that scans a folder, analyzes it in Rust and exports a USB that plays on a CDJ-3000. Done when: the sync UI round 3 is built and reviewed (Q14), the brother's engine supports playlist-scoped sync, the bundle id is neutral (24), and the app is signed.
 
 ## Rulebook
-AGENTS.md ## Unattended (autonomy tight). No Tauri windows, audio output or USB writes on dev; those are `[mac]`.
+AGENTS.md ## Unattended (autonomy tight). No Tauri windows, audio output or USB writes on dev; those are `[mac]`. Workers: API credit runs with per-run --budget; shared cap $450/month all projects.
 
 ## Branches and builds
 - master d231066 (+ docs) = review build 1427 code (parked-all-v23 merged), pushed 2026-11-15 per Merlin. Build 1974 from master.
