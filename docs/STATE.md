@@ -42,6 +42,7 @@ AGENTS.md ## Unattended (autonomy tight). No Tauri windows, audio output or USB 
 47. Energy 1-10 (off): vs DEAM Spearman 0.58 (electronic 0.65). rec: keep off until a UI need - branch: truth-eval
 50. Playback wakeups (r123) untested on a device. rec: listen on the Mac, then land - branch: r123-idle-cpu 491ffcb
 52. Real-app Mac soak (r140) needs the Mac ~1 h on power. rec: one evening - branch: r140-mac-soak 9d53fae
+53. WebKit leak (Q72, branch webkit-mem-night 4700038): command palette keeps ~20 MB per open/close, search +100 MB/min. rec: worker heap-snapshots the palette to find the cause
 5. Old stash@{0} (waveform tweaks, prototyping only). rec: drop or branch - branch: none
 
 ### Needs Merlin at the Mac
