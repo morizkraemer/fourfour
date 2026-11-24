@@ -149,6 +149,8 @@ def probe_for(kind, args):
     elif kind == "soak":
         ids = ",".join(str(i) for i in range(7, 10000, 250))
         base.update({"soakMinutes": args.soak_minutes, "soakSampleSecs": 30, "soakAnalysisIds": [int(i) for i in ids.split(",")]})
+        if args.soak_actions:
+            base["soakActions"] = args.soak_actions.split(",")
     return base
 
 
@@ -196,6 +198,7 @@ def run(args):
     next_footprint = 0
     footprints = []
     last_db = (None, 0)
+    pressure = None
     deadline = start_wall + args.max_seconds
     while time.time() < deadline and proc.poll() is None:
         t = time.time()
@@ -219,8 +222,8 @@ def run(args):
         row["analysed"] = last_db[0]
         if t >= next_footprint:
             fp = {pid: footprint_mb(pid) for pid in mine if pid in table}
-            footprints.append({"t": round(t, 2), "app_mb": fp.get(proc.pid), "web_mb": sum(v or 0 for k, v in fp.items() if k != proc.pid)})
-            next_footprint = t + 30
+            footprints.append({"t": round(t, 2), "app_mb": fp.get(proc.pid), "web_mb": sum(v or 0 for k, v in fp.items() if k != proc.pid), "per_pid": {str(k): [table[k][2].split("/")[-1][:40], v] for k, v in fp.items()}})
+            next_footprint = t + args.footprint_secs
         samples.append(row)
         marks = read_marks(log)
         if done_at is None and args.kind == "backend-idle":
@@ -232,9 +235,14 @@ def run(args):
                 done_at = time.time()
         elif done_at is None and any(m["mark"] == "probe_done" for m in marks):
             done_at = time.time()
+        if args.pressure_after and done_at is not None and pressure is None and time.time() - done_at >= args.pressure_after:
+            pressure = subprocess.Popen(["memory_pressure", "-S", "-l", "warn", "-s", "30"], stdout=open(out / "pressure.out", "w"), stderr=subprocess.STDOUT)
+            samples[-1]["pressure_start"] = True
         if done_at is not None and time.time() - done_at >= args.idle_after:
             break
         time.sleep(max(0.0, SAMPLE_SECS - (time.time() - t)))
+    if pressure is not None and pressure.poll() is None:
+        pressure.terminate()
     proc.terminate()
     try:
         proc.wait(timeout=15)
@@ -346,6 +354,9 @@ def main():
     r.add_argument("--analysis-ms", type=int, default=60000)
     r.add_argument("--scroll-seconds", type=int, default=45)
     r.add_argument("--soak-minutes", type=float, default=25)
+    r.add_argument("--soak-actions", default="")
+    r.add_argument("--footprint-secs", type=float, default=30)
+    r.add_argument("--pressure-after", type=float, default=0)
     r.add_argument("--max-seconds", type=float, default=3600)
     sub.add_parser("summary")
     args = parser.parse_args()
