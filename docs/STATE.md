@@ -55,7 +55,6 @@ AGENTS.md ## Unattended (autonomy tight). No Tauri windows, audio output or USB 
 ### Q63 Writer v2 [in master, off] - next: FF-GOLDEN byte diff (slice 4), then Mo's CDJ-3000 check, then make it default
 ### Q8 Cross-platform CI [waiting, 15]
 ### Later
-- rc tests on the Mac: 7 macOS-only test failures (APFS case/NFD, tempo extremes, truncated playback, unicode paths).
 - bench_analysis --dump pairs results off by one after a failed file.
 - Stick read for Rekordbox-only sticks: plan docs/plans/stick-read-2026-11-22.md.
 - Clean old worktrees and cargo caches.
