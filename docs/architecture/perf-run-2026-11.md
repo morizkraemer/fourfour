@@ -4374,6 +4374,21 @@ Raw: `~/dev/build/fourfour-r140/results/wk-*/run.json` on `mbp` (`wk-palette2` h
 
 Raw: `~/dev/build/fourfour-r140/results/pl-*/run.json` on `mbp`; experiment switches on branch `pl-exp` (not for merge).
 
+## Palette leak fix, before/after (2026-11-25, `palette-leak-fix`)
+
+**Change.** `TrackTable.svelte` keys the scroll container on one bucket: content taller than 2000 px (WebKit's limit for an untiled layer) or not. Crossing it (10k rows to a few or none and back) rebuilds the scroller; scrolling, sorting and filters that stay on one side do not. Scroll resets to the top there (Merlin, 2026-11-25). Focus: if the old list had focus it moves to the new one; a palette close whose return target was removed focuses the tracks region entry (the list) instead of `body`. Smoke `table-remount.spec.ts` covers both (Chromium and WebKit).
+
+**Method.** Same as the cause section: build clone `~/dev/build/fourfour-r140` on `mbp`, scratch HOME, 10k fixture, `steps` soak typing "set" in the palette, clearing it, Escape. WebContent footprint every 5 s. Merlin's /Applications app was running; the test app is a separate process with its own HOME and was only started after 2 min without input on the Mac.
+
+| Run (1 min palette soak) | Cycles | WebContent start → end | MB/cycle |
+|---|---:|---|---:|
+| before (`pl-set`, same steps) | 182 | 793 → 4324 MB, linear | 19.4 |
+| after (`plf-fix-palette-1m`) | 181 | 404 → 1030 MB, flat at about 1020 MB for the last 25 s, 804 MB after 20 s idle | 3.5 |
+
+Before grows linearly (about 3.5 GB/min). After rises over the first 35 s and then holds, so the 3.5 MB/cycle is mostly warm-up, not a per-cycle leak; that needs the longer run to confirm.
+
+**Not done.** The 5-minute palette soak and the search-only soak (before and after) did not run: Merlin used the Mac for the whole following hour and the batch waits for 2 min of idle input. Batch ready: `~/dev/build/fourfour-r140/plf-batch.sh` (1-min fix check, base palette 1 min, base search 2 min, fix palette 5 min, fix search 5 min, summary via `plf-summary.py`; base app at `fourfour-base.app` via `base-root/`).
+
 ## R140 Mac soak, full run (2026-11-24, `r140-soak-night`)
 
 **Status: done.** `mbp` unlocked and on AC, Merlin's fourfour.app not running. App built from this branch (app code identical to master = installed build 2148, `--features coreml`, bundled int8 weights) in the build clone `~/dev/build/fourfour-r140`, own cargo target, never installed. Every launch used a scratch HOME under that folder; the protected paths were unchanged after all 7 runs. Fixture: the Mac's `~/.cache/ff-fixture/10k` had lost its library and all but 200 music files (no ffmpeg there to regenerate), so the 10k library was rebuilt with `bench_startup fixture-lib` from 50 hard-linked copies of those 200 files (70% analysed, seed 4404). Rows, tags and covers repeat every 200 tracks; numbers are comparable to each other, not exactly to the original fixture.
