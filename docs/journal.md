@@ -915,3 +915,4 @@
 2026-11-25 06:29 orchestrator Q73b spawn: palette leak fix, option 1 remount scroll container on tall/short switch (Merlin "go with your recs for the leak"); opus medium, $8 cap, branch palette-leak-fix
 2026-11-25 06:32 orch-worker Q75 cost: $7.4950 (fable) — RESULT: head `13ac5ff` on `stick-ui-r5`, card `stick-ui-r5` (open, confirmed in the hub list). ✅ **Done** - 3 concepts built behind `?exp=stick-keep:a|b|c` - Ca [branch stick-ui-r5]
 2026-11-25 06:32 orchestrator Q75 stick-ui-r5 done [13ac5ff] ($7.49): 3 keep-updated concepts behind ?exp=stick-keep:a|b|c, rec A two sections (Kept up to date / Copied once); card stick-ui-r5 open, 2 questions. Month $288/450
+2026-11-25 07:44 orchestrator Merlin on stick-ui-r5: not sure about sections, all 3 weird layout-wise, redo whole thing with Fable. Q76 spawn: stick-ui-r6 whole stick layout redesign, fable medium, $14 cap
