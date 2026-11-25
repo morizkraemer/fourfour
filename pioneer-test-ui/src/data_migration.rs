@@ -41,7 +41,7 @@ pub enum Outcome {
 type Env<'a> = &'a dyn Fn(&str) -> Option<OsString>;
 
 pub fn app_dirs(os: Os, identifier: &str, env: Env) -> Vec<PathBuf> {
-    let absolute = |name: &str| env(name).map(PathBuf::from).filter(|p| p.is_absolute());
+    let absolute = |name: &str| env(name).map(PathBuf::from).filter(|p| p.has_root());
     let under = |bases: Vec<Option<PathBuf>>| bases.into_iter().flatten().map(|base| base.join(identifier)).collect();
     match os {
         Os::Macos => {
