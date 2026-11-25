@@ -930,3 +930,5 @@
 2026-11-25 13:18 orchestrator Merlin on stick-asks: setup modal layout and copy not liked -> Fable redesign; card Q1/Q2 taken per rec (auto on, 5 s). Q79 spawn: stick-setup, fable medium, $10 cap
 2026-11-25 13:23 orchestrator PM relay of Merlin (25 Nov 21:22 WITA "yes. ill plug it in now."): Mac on power overnight, API workers. Plan: after Q79 green -> Mac build + tests of stick-setup (unlanded); also leak plf-batch.sh 20-min check (rec 1 from earlier)
 2026-11-25 13:23 orchestrator Q73c spawn: leak fix 20-min Mac check (plf-batch.sh), sonnet low, $2 cap, branch palette-leak-check
+2026-11-25 13:47 orch-worker Q79 cost: $6.8294 (fable) — RESULT: head `04aaf48` on `stick-setup`, card `stick-setup` (open, confirmed in the hub list). ✅ **Done** - Setup dialog redesigned: stick left, playlists right [branch stick-setup]
+2026-11-25 13:48 orchestrator Q79 stick-setup done [04aaf48] ($6.83): setup dialog split layout + new copy, fixed NaN size bug (won't fit never triggered); smoke 230 pass; card stick-setup open (2 picks). Q80 spawn: Mac tests + DMG of stick-setup, sonnet medium, $4 cap, branch stick-setup-mac
