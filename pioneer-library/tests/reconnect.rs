@@ -265,10 +265,11 @@ fn a_relocation_with_nothing_found_or_to_the_same_folder_is_refused() {
 fn a_remap_does_not_take_a_path_another_track_has() {
     let fx = Fixture::new(2);
     let moved = fx.dir.path().join("moved");
-    std::fs::create_dir_all(moved.join("artist00")).unwrap();
-    std::fs::copy(fx.path(0), moved.join("artist00/track0000.wav")).unwrap();
-    std::fs::copy(fx.path(1), moved.join("artist00/track0001.wav")).unwrap();
-    let squatter = scanner::scan_files(&[moved.join("artist00/track0001.wav")]).unwrap();
+    let artist = moved.join("artist00");
+    std::fs::create_dir_all(&artist).unwrap();
+    std::fs::copy(fx.path(0), artist.join("track0000.wav")).unwrap();
+    std::fs::copy(fx.path(1), artist.join("track0001.wav")).unwrap();
+    let squatter = scanner::scan_files(&[artist.join("track0001.wav")]).unwrap();
     fx.library.add_tracks(&squatter).unwrap();
 
     let preview = fx.library.preview_remap(&fx.music, &moved).unwrap();
