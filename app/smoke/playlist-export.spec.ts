@@ -21,7 +21,8 @@ test('Export playlist picks a format, asks where to save and reports the result'
   ]);
 });
 
-test('Copy tracklist reports how many tracks it copied', async ({ smoke }) => {
+test('Copy tracklist reports how many tracks it copied', async ({ smoke, browserName }) => {
+  test.skip(browserName === 'webkit', 'Playwright WebKit has no clipboard permissions');
   const { page } = smoke;
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
   await sidebarPlaylist(page, 'Peak Time').click({ button: 'right' });

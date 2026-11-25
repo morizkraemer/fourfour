@@ -104,6 +104,7 @@ test('memory cue chips add at the playhead, jump and remove with Alt', async ({ 
   const { page } = smoke;
   await loadByDoubleClick(page, TRACK);
   await page.locator('.ff-player-compact__expand-btn').click();
+  await expect(page.locator('.ff-xp__pads .ff-xp__pad--set')).toHaveCount(1);
   const chips = page.locator('.ff-xp [data-memory-chip]');
   const before = await chips.count();
   await page.locator('.ff-xp').getByRole('button', { name: 'Add memory cue', exact: true }).click();
