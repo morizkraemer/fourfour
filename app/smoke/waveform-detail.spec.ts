@@ -97,6 +97,7 @@ async function msToFirstZoomPaint(page: Page, detailMs: number) {
   await page.locator('.ff-player-compact__expand-btn').click();
   const started = Date.now();
   await expect(zoom).toBeVisible();
+  await expect(zoom).toHaveAttribute('data-bands', /.+/);
   const release = setTimeout(() => void page.evaluate(() => (window as unknown as SmokeWindow).__smokeReleaseDetail?.()), detailMs);
   await expect(zoom).not.toHaveAttribute('data-bands', /^(pending|none)$/);
   const painted = Date.now() - started;

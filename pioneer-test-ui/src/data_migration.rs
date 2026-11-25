@@ -41,7 +41,7 @@ pub enum Outcome {
 type Env<'a> = &'a dyn Fn(&str) -> Option<OsString>;
 
 pub fn app_dirs(os: Os, identifier: &str, env: Env) -> Vec<PathBuf> {
-    let absolute = |name: &str| env(name).map(PathBuf::from).filter(|p| p.is_absolute());
+    let absolute = |name: &str| env(name).map(PathBuf::from).filter(|p| p.has_root());
     let under = |bases: Vec<Option<PathBuf>>| bases.into_iter().flatten().map(|base| base.join(identifier)).collect();
     match os {
         Os::Macos => {
@@ -437,14 +437,14 @@ mod tests {
     #[test]
     fn the_app_dirs_follow_the_platform_layout() {
         let mac = app_dirs(Os::Macos, "app.x", &env_of(&[("HOME", "/Users/dj")]));
-        let mac: Vec<_> = mac.iter().map(|p| p.to_string_lossy().into_owned()).collect();
+        let library = PathBuf::from("/Users/dj").join("Library");
         assert_eq!(
             mac,
             [
-                "/Users/dj/Library/Application Support/app.x",
-                "/Users/dj/Library/Caches/app.x",
-                "/Users/dj/Library/Logs/app.x",
-                "/Users/dj/Library/WebKit/app.x",
+                library.join("Application Support").join("app.x"),
+                library.join("Caches").join("app.x"),
+                library.join("Logs").join("app.x"),
+                library.join("WebKit").join("app.x"),
             ]
         );
         let windows = app_dirs(Os::Windows, "app.x", &env_of(&[("APPDATA", "/r"), ("LOCALAPPDATA", "/l")]));

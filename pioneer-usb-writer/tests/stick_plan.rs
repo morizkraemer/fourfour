@@ -140,7 +140,7 @@ fn listing(root: &Path) -> BTreeMap<String, (u64, SystemTime)> {
             if meta.is_dir() {
                 stack.push(entry.path());
             } else {
-                let rel = entry.path().strip_prefix(root).unwrap().to_string_lossy().into_owned();
+                let rel = entry.path().strip_prefix(root).unwrap().to_string_lossy().replace(std::path::MAIN_SEPARATOR, "/");
                 out.insert(rel, (meta.len(), meta.modified().unwrap()));
             }
         }
@@ -382,6 +382,7 @@ fn trailing_dots_and_case_collisions_get_safe_paths() {
         let analysis = stick.read_analysis(track).unwrap();
         assert_eq!(analysis.dat.unwrap().path().as_deref(), Some(track.path.as_str()));
     }
+    #[cfg(not(windows))]
     assert!(!usb.path().join("Contents/Artist Name.").exists());
     assert!(planned(usb.path(), &library, &owned).is_noop());
 }

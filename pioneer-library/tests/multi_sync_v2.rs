@@ -71,7 +71,7 @@ fn listing(root: &Path) -> BTreeMap<String, (u64, SystemTime)> {
             if meta.is_dir() {
                 stack.push(entry.path());
             } else {
-                let rel = entry.path().strip_prefix(root).unwrap().to_string_lossy().into_owned();
+                let rel = entry.path().strip_prefix(root).unwrap().to_string_lossy().replace(std::path::MAIN_SEPARATOR, "/");
                 out.insert(rel, (meta.len(), meta.modified().unwrap()));
             }
         }
