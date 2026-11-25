@@ -899,3 +899,4 @@
 2026-11-24 16:16 orchestrator Q71 mac tests done ($1.08): master green on macOS (945 pass, 0 fail) and Linux; the 7 failures were already fixed by the xplat commits (tempo test limit 5->8 cents). Item closed. Spawned Q72 WebKit memory split soak (opus $5)
 2026-11-24 18:38 orch-worker Q72 cost: $2.0623 (opus) — ✅ **Done** - RESULT: head `4700038` (branch `webkit-mem-night`), section added to `perf-run-2026-11.md`. - **Verdict: it's a leak, not cache. The command palett [branch webkit-mem-night]
 2026-11-24 18:38 orchestrator Q72 webkit-mem-night done [4700038] ($2.06): command palette leaks ~20 MB per open/Escape in WebContent (killed at 16.5 GB), search +100 MB/min leak candidate; fling/seek cache, rest flat. Month $269/450
+2026-11-25 04:18 orchestrator Q73 spawn: palette leak root cause + fix (Merlin: find root cause); opus medium, $8 cap, branch palette-leak
