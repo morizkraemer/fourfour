@@ -927,3 +927,4 @@
 2026-11-25 09:31 orchestrator Merlin: build 2242 works great; keep plug-in auto-sync with guards; fresh stick gets a setup prompt, new playlist on a stick asks first. Q78 spawn: stick-asks, sonnet high, $7 cap
 2026-11-25 09:59 orch-worker Q78 cost: $3.2273 (sonnet) — ✅ **Done** - That notice is the earlier wait loop finishing. It adds nothing new. - The result stands: head `1e04c61`, card `stick-asks`. Full smoke: 226 passed [branch stick-asks]
 2026-11-25 09:59 orchestrator Q78 stick-asks done [1e04c61] ($3.23): found today nothing auto-syncs on plug-in; now known sticks auto-sync (toggle), fresh stick setup prompt (Not now = read-only), held implicit playlist adds, direct add undo 5 s, big-sync cancel 5 s; smoke 226 pass; card stick-asks open
+2026-11-25 13:18 orchestrator Merlin on stick-asks: setup modal layout and copy not liked -> Fable redesign; card Q1/Q2 taken per rec (auto on, 5 s). Q79 spawn: stick-setup, fable medium, $10 cap
