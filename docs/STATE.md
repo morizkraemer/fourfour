@@ -18,7 +18,7 @@ AGENTS.md ## Unattended (autonomy tight). No Tauri windows, audio output or USB 
 
 ## Branches and builds
 - master f324215+ (pushed 2026-11-23) = rc 932dcc3 merged: stick UI r1-r2, play from stick, Tab fix, duplicates, reconnect, playlist export, writer v2 (off, FOURFOUR_SYNC_ENGINE=v2), perf. A few docs commits unpushed.
-- Mac: build 2148 (= master app code) in /Applications, bundle id app.ffdj.library. Blog post published 2026-11-22.
+- Mac: build 2242 (stick-r6-test, layout 2 default) in /Applications 2026-11-25, bundle id app.ffdj.library. Blog post published 2026-11-22.
 - Analysis branches (not merged, all off): phrase-r2 4cc1ab9, truth-eval 19f31bf, genre-r1 60cd1f9, h2h-rekordbox d591713, mac-2025-run 2171b43.
 
 ## Waiting on Merlin
