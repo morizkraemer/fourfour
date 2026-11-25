@@ -901,3 +901,5 @@
 2026-11-24 18:38 orchestrator Q72 webkit-mem-night done [4700038] ($2.06): command palette leaks ~20 MB per open/Escape in WebContent (killed at 16.5 GB), search +100 MB/min leak candidate; fling/seek cache, rest flat. Month $269/450
 2026-11-25 04:18 orchestrator Q73 spawn: palette leak root cause + fix (Merlin: find root cause); opus medium, $8 cap, branch palette-leak
 2026-11-25 04:30 orchestrator Q74 spawn: CI cleanup (PM relay of Merlin 11-24 "for the ci stuff go all your recs yes"): all 5 master jobs red 11-23; sonnet medium, $6 cap, branch ci-cleanup
+2026-11-25 04:45 orch-worker Q74 cost: $1.0675 (sonnet) — ✅ **Done** - Local fixes committed on `ci-cleanup`, head `b6ff1a5`. - Notices regenerated: drift was stale deps (rustix etc.). - Windows: 7 test failures fixed  [branch ci-cleanup]
+2026-11-25 04:45 orchestrator Q74 ci-cleanup local fixes [b6ff1a5] ($1.07): notices regen, 7 Windows path test fixes, tag_scan timing warm-up, 3 smoke races, webkit clipboard skip; worker push denied, orchestrator pushed branch, CI run 45548949499
