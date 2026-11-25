@@ -4341,6 +4341,39 @@ Idle is flat and silent (0% CPU over 108 s, RSS identical). Treat the WebKit fig
 
 Raw: `~/dev/build/fourfour-r140/results/wk-*/run.json` on `mbp` (`wk-palette2` has per-process footprints).
 
+## Palette leak root cause (2026-11-25, `palette-leak`)
+
+**Question.** Why does each command palette open/type/Escape cycle keep about 20 MB in the WebKit WebContent process (`webkit-mem-night`)?
+
+**Method.** Build clone `~/dev/build/fourfour-r140` on `mbp` (AC, unlocked), scratch HOME, 10k fixture. The probe gained a `steps` soak action (scripted keys, typing, waits and `eval` snippets from `--soak-steps`), `--probe-extra` and canvas/img/animation counts per sample. Each variant: 1 min loop, WebContent footprint every 5 s, 20 s idle. MB/cycle = WebContent footprint growth over the loop / cycles.
+
+| Variant (1 min) | Cycles | MB/cycle | What changes per cycle |
+|---|---:|---:|---|
+| original `palette` action | 207 | 17.7 | palette opens, list filtered by "set", cleared |
+| open + Escape, no typing | 226 | 0.3 | palette only |
+| type `>set` (commands only) | 181 | 0.5 | palette rows change, track list does not |
+| type "set", then clear | 182 | 21.9 | list: full 10k ↔ filtered |
+| type "zzqxjv" (no match), then clear | 181 | 25.9 | list: full ↔ empty |
+| type "smoke", then clear | 181 | 22.3 | list: full ↔ filtered |
+| type "e" (matches every track), then clear | 190 | 0.5 | list unchanged |
+| "set" held, palette reopened | 225 | 0.4 | list stays filtered |
+| "set" ↔ "sett" | 117 | 0.5 | filtered ↔ filtered, both short |
+| no-match variant, row waveforms off (experiment build) | 54 | about 9 (run cut short) | rows without canvases |
+| no-match variant, row pool kept mounted (experiment build) | 186 | 21.6 | no row remount |
+| `eval`: 49 canvases created, drawn, removed | 208 | 0.2 | WebKit canvas churn only |
+| `eval`: 49 divs with the row cover blob URLs, removed | 225 | 0.0 | cover images only |
+| `eval`: table body height to 0 and back, no filter, no palette | 200 | **28.0** | only the scroll content height |
+| `eval`: table body height to half and back | 197 | 0.3 | tall ↔ tall |
+| `eval`: table body height to 2000 px and back | 200 | **39.4** | tall ↔ short |
+
+**Root cause.** Not the palette and not app JS: WebKit leaks WebContent memory each time the track table's scroll content (`.ff-table__body`, height = rows × row height, about 280,000 px for 10k tracks) switches between tall and short on the same element. Tall ↔ tall is flat; tall ↔ short leaks 28-40 MB per round trip, with nothing else changing. The palette hits it because typing a query that narrows All Tracks to few or no rows and then clearing it shrinks and regrows that element (the palette types into the shared list filter). Most likely WebKit swaps the scrolled layer between tiled and untiled backing at a size threshold and does not free the old backing; this is inferred from the tall/short split, not seen in a WebKit trace.
+
+**Search.** Same path in principle (header search drives the same list filter), but only proven for the palette: the search soak's about 2 MB per search is far below one tall ↔ short round trip, so its queries probably keep the list tall most of the time. Not rerun.
+
+**Fix.** Not done: every in-place candidate changes layout or behaviour (keep the body tall when empty = an empty scroll range; recreate the scroll container on the tall/short switch = scroll position and focus reset; hide the scroller while empty = a different empty-state structure), and none was tested. Next step is one `eval` test per candidate with the `steps` action before any app change.
+
+Raw: `~/dev/build/fourfour-r140/results/pl-*/run.json` on `mbp`; experiment switches on branch `pl-exp` (not for merge).
+
 ## R140 Mac soak, full run (2026-11-24, `r140-soak-night`)
 
 **Status: done.** `mbp` unlocked and on AC, Merlin's fourfour.app not running. App built from this branch (app code identical to master = installed build 2148, `--features coreml`, bundled int8 weights) in the build clone `~/dev/build/fourfour-r140`, own cargo target, never installed. Every launch used a scratch HOME under that folder; the protected paths were unchanged after all 7 runs. Fixture: the Mac's `~/.cache/ff-fixture/10k` had lost its library and all but 200 music files (no ffmpeg there to regenerate), so the 10k library was rebuilt with `bench_startup fixture-lib` from 50 hard-linked copies of those 200 files (70% analysed, seed 4404). Rows, tags and covers repeat every 200 tracks; numbers are comparable to each other, not exactly to the original fixture.
