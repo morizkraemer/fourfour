@@ -245,10 +245,11 @@ def component_texts(component):
 def declared_or_standard_text(source):
     if "node_module" in source:
         directory = os.path.join(REPO, "app", "node_modules", *source["node_module"].split("/"))
-        if os.path.isdir(directory):
-            files = license_files(directory)
-            if files:
-                return read_text(os.path.join(directory, files[0]))
+        if not os.path.isdir(directory):
+            raise SystemExit(f"FAIL: {directory} is missing; run npm ci in app first")
+        files = license_files(directory)
+        if files:
+            return read_text(os.path.join(directory, files[0]))
     return standard_text(source["standard"], source["holder"])
 
 

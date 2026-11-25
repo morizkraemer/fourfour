@@ -407,6 +407,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "wall-clock timing, 10x slower on shared macOS CI runners; run with --ignored on a real machine"]
     fn sparse_zero_files_read_as_fast_as_the_plain_reader() {
         let dir = std::env::temp_dir().join(format!("ff-tagscan-sparse-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
