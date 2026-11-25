@@ -900,3 +900,4 @@
 2026-11-24 18:38 orch-worker Q72 cost: $2.0623 (opus) — ✅ **Done** - RESULT: head `4700038` (branch `webkit-mem-night`), section added to `perf-run-2026-11.md`. - **Verdict: it's a leak, not cache. The command palett [branch webkit-mem-night]
 2026-11-24 18:38 orchestrator Q72 webkit-mem-night done [4700038] ($2.06): command palette leaks ~20 MB per open/Escape in WebContent (killed at 16.5 GB), search +100 MB/min leak candidate; fling/seek cache, rest flat. Month $269/450
 2026-11-25 04:18 orchestrator Q73 spawn: palette leak root cause + fix (Merlin: find root cause); opus medium, $8 cap, branch palette-leak
+2026-11-25 04:30 orchestrator Q74 spawn: CI cleanup (PM relay of Merlin 11-24 "for the ci stuff go all your recs yes"): all 5 master jobs red 11-23; sonnet medium, $6 cap, branch ci-cleanup
