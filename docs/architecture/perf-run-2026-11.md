@@ -4445,3 +4445,18 @@ It bundles the branches, copies them and the int8 model to `mbp` (the `ship-dmg.
 1. **r123 audio (branch `r123-idle-cpu`, needs a Mac install of that branch first, ask for it).** Long track (over 6 min). Set the buffer to 32, then 64 frames. Play 2 min: any click or dropout? Seek 5 times (bar jumps, scrub): any glitch? Minimise the window for 30 s while playing, bring it back: sound unbroken, meters alive again at once.
 2. **Waiting 16, bar 1 (b15-bar1 e717de0).** Open the ten tracks listed in `docs/analysis/rust-status-2026-10-28.md` ("the last five are the regressions to listen to"). For each: does bar 1 sit on the first downbeat as Rekordbox has it? Verdict per track: ok / wrong. Land the rule if the five regressions are ok.
 3. **Waiting 39, user docs marks (branch `r53-user-docs-v2` 56f7625, `docs/user/`).** 20 "(to confirm)" marks: faq 10, usb 3, known-issues 4, install 1, quick-start 1, README 1 (`grep -n "(to confirm)" docs/user/*.md`). Read on the phone, confirm each on the Mac: right, or what the app really does. Send back the list of answers.
+
+## Palette leak fix, 5-min soaks (2026-11-25, `palette-leak-check`)
+
+Mac, clone builds only, scratch HOME, batch `plf-batch.sh`, user idle gate, on power. Web process MB from footprint samples.
+
+| Run | Build | Length | Cycles | Web start-end MB | MB/cycle | Per minute MB |
+|---|---|---|---|---|---|---|
+| palette | fix | 1 min | 178 | 606 - 520 | -0.48 | -86 |
+| palette | fix | 5 min | 892 | 499 - 433 | -0.07 | +19, -54, -26, -13, -2 |
+| search | fix | 5 min | 342 | 628 - 441 | -0.55 | -116, -114, -142, -18, -9 |
+| palette | master | 1 min | 3140 | 200 - 196 | 0.00 | -4 |
+| search | master | 2 min | 137 | 617 - 546 | -0.52 | -11, -84 |
+
+Verdict: the fix holds over 5 min on palette and search (no growth, memory falls after idle to about 240 MB).
+Caveat: the master palette run did not reproduce the leak (3140 cycles, flat at 200 MB, against 19.4 MB/cycle in the earlier probe), so this batch gives no fresh before number for palette. The earlier 19.4 to 3.5 MB/cycle comparison stands. Master search is flat too, so search never leaked.
