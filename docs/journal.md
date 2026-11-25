@@ -905,3 +905,8 @@
 2026-11-25 04:45 orchestrator Q74 ci-cleanup local fixes [b6ff1a5] ($1.07): notices regen, 7 Windows path test fixes, tag_scan timing warm-up, 3 smoke races, webkit clipboard skip; worker push denied, orchestrator pushed branch, CI run 45548949499
 2026-11-25 05:18 orch-worker Q74b cost: $1.5602 (sonnet) — ✅ **Done** (committed, not pushed). Head `1ccd438`. - Notices: my first file was made before `npm ci`, so `@tauri-apps/api` fell back to MIT. Regenerated with ` [branch ci-cleanup]
 2026-11-25 05:18 orchestrator Q74b ci-cleanup round 2 [1ccd438] ($1.56): notices script fix, Windows app-dir test, macOS timing test CI-safe; pushed branch, CI rerun
+2026-11-25 05:40 orch-worker Q73 cost: $6.2441 (opus) — BLOCKED: I found the root cause of the palette leak but did not fix it. Every fix I can see changes layout or behaviour, and I had no budget left to test one. ✅ [branch palette-leak]
+2026-11-25 06:08 orch-worker Q73 palette-leak BLOCKED [4fbc075] ($6.24): cause is WebKit leaking 28-40 MB each time the track table switches between ~280k px tall and short; palette only triggers it via filter "set". Fix options need a small visible change -> Merlin
+2026-11-25 06:08 orchestrator decided: genre paused (Merlin "genre pause it its fine"); branches genre-r2-data, genre-r2-beatfeat kept, off
+2026-11-25 06:08 orchestrator Merlin reviewed stick-ui-r4: keep-updated header reads as two columns, still not intuitive; chose Fable explores 3 concepts. Q75 spawn: fable medium, $12 cap, branch stick-ui-r5
+2026-11-25 06:08 orchestrator FF-GOLDEN check: INTENSO holds a fourfour export from 11-23 (manifest), no Rekordbox golden export yet

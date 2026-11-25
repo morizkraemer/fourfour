@@ -22,7 +22,7 @@ AGENTS.md ## Unattended (autonomy tight). No Tauri windows, audio output or USB 
 - Analysis branches (not merged, all off): phrase-r2 4cc1ab9, truth-eval 19f31bf, genre-r1 60cd1f9, h2h-rekordbox d591713, mac-2025-run 2171b43.
 
 ## Waiting on Merlin
-1. Stick UI round 3 (Q68, running): review the lab card when it lands - branch: stick-ui-r3
+1. Stick UI round 5 (Q75, running): 3 keep-updated concepts, pick on card stick-ui-r5 - branch: stick-ui-r5
 2. FF-GOLDEN: small Rekordbox export on INTENSO (5 tracks; exports A, A2, B, copied off between each). Gates the writer v2 byte diff - branch: writer-v2 (in master)
 3. Mo's CDJ-3000 test of writer v2: steps still to write. rec: I write them, you OK filing them as an issue - branch: master
 4. Security review (public repo, report ~/dev/pm/reviews/2026-11-23-security-fourfour.md; no fixes run, ranked):
@@ -42,7 +42,7 @@ AGENTS.md ## Unattended (autonomy tight). No Tauri windows, audio output or USB 
 47. Energy 1-10 (off): vs DEAM Spearman 0.58 (electronic 0.65). rec: keep off until a UI need - branch: truth-eval
 50. Playback wakeups (r123) untested on a device. rec: listen on the Mac, then land - branch: r123-idle-cpu 491ffcb
 52. Real-app Mac soak (r140) needs the Mac ~1 h on power. rec: one evening - branch: r140-mac-soak 9d53fae
-53. WebKit leak (Q72, branch webkit-mem-night 4700038): command palette keeps ~20 MB per open/close, search +100 MB/min. rec: worker heap-snapshots the palette to find the cause
+53. WebKit leak: cause found (Q73, branch palette-leak 4fbc075): the track table leaks 28-40 MB each time it switches between very tall and short (palette filter triggers it). rec: rebuild the scroll container on that switch (scroll and focus reset then) - branch: palette-leak
 5. Old stash@{0} (waveform tweaks, prototyping only). rec: drop or branch - branch: none
 
 ### Needs Merlin at the Mac
@@ -50,9 +50,9 @@ AGENTS.md ## Unattended (autonomy tight). No Tauri windows, audio output or USB 
 - Manual tests of build 2148 done 2026-11-23; feedback went into Q68.
 
 ## Queue
-### Q66 Genre r2: beat-model features [running] [box] - pooled Beat This hidden states as genre features; opus, $10 cap; branch genre-r2-beatfeat
-### Q67 Genre r2: free training data [running] [box] - Jamendo/Freesound/netlabel CC BY/CC0 club audio, retrain, score; sonnet, $10 cap; branch genre-r2-data
-### Q68 Stick UI round 3 [running] [box] - Fable, $15 cap: toggle shift, false "changes waiting", sidebar dot, click focus ring; flow review (keep updated, pinned sticks, inspector vs panel, top bar, menu labels); drag stick tracks into library (copies audio). Lab card stick-ui-r3
+### Genre [paused 2026-11-25 per Merlin] - r2: data is the limit; branches genre-r2-data, genre-r2-beatfeat kept
+### Q75 Stick UI round 5 [running] [box] - Fable $12: 3 keep-updated concepts; card stick-ui-r5
+### Q74 CI cleanup [running] [box] - branch ci-cleanup pushed, CI rerun; then Merlin OKs merge to master
 ### Q63 Writer v2 [in master, off] - next: FF-GOLDEN byte diff (slice 4), then Mo's CDJ-3000 check, then make it default
 ### Q8 Cross-platform CI [waiting, 15]
 ### Later
