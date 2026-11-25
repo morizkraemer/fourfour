@@ -4300,6 +4300,102 @@ Lab card `r159-scroll-edges` round 2 (backlog): old and new clip, 10k list, 10,0
 
 `perf-scroll-edges.spec.ts` gains `FF_PERF_EDGES_LIMIT` (list size), `FF_PERF_EDGES_SPEEDS`, `FF_PERF_EDGES_CLIP_SPEED`, `FF_PERF_EDGES_QUERY_RUNS` (URL query per run, for `?exp=` A/B in one build), `FF_PERF_EDGES_GESTURE_SCALE_RUNS` (gesture scale per run), a `rest` report (rows in the DOM at rest), incomplete rows per frame and frame gaps. Scratch (`~/.cache/r175*`) is deleted after this item.
 
+## R140 Mac soak (build 1314)
+
+**Status: blocked, only the idle-after-open row was measured.** `mbp` was screen-locked for the whole run (`CGSSessionScreenIsLocked` true, `screencapture` fails with "could not create image from display"; nobody at the Mac, and unlocking is not something a worker does). A locked screen occludes every window, WKWebView stops animation frames, and the probe's first-row wait (`requestAnimationFrame`) never returns: the pilot launch logged `load_state_encoded` at 6.0 s and nothing after it for 200 s. Everything in the plan that needs a live page is therefore not measured: scripted scroll, expanded player, soak loop, and the analysis of 50 tracks (analysis is started by the frontend calling `analyze_tracks`; a backend-only launch with 50 un-analysed tracks sat at 0 CPU for 10 minutes and analysed none). No 50k fixture exists on the Mac (only `~/.cache/ff-fixture/10k` and `pool-v1`), so 50k was not run either.
+
+**Setup.** Copy of the installed bundle (`pioneer-test-ui` byte-identical to `/Applications/fourfour.app`, built at `~/dev/build/fourfour-wt2-target`) in `~/dev/build/fourfour-r140/fourfour.app`, HOME in a scratch folder under that directory, copy of the 10k fixture library, `auto_analyze_new_tracks: false`, real model weights read in place, on AC power, no audio played, no USB, the protected paths (Pioneer, rekordbox, `com.pioneer.test-ui`) hashed before and after (unchanged). `scripts/mac/r140-soak.py` samples every 2 s with `ps` (RSS and cumulative CPU time of the app and the three WebKit XPC processes that appeared after the launch: WebContent, GPU, Networking) and every 30 s with `footprint -p`.
+
+| Phase (10k, launch with page loaded but screen locked) | App RSS | WebKit RSS (3 processes) | App CPU | WebKit CPU | Footprint app / WebKit |
+|---|---:|---:|---:|---:|---:|
+| first 30 s after `load_state` | 214 MB | 160 MB | 0% | 0% | 131 / 112 MB |
+| next 108 s idle | 214 MB | 160 MB | 0% | 0% | 131 / 112 MB |
+
+Idle is flat and silent (0% CPU over 108 s, RSS identical). Treat the WebKit figure as a floor: the page is not rendering, so no rows, covers or canvases were drawn. The Linux soak (R42) saw 277 MB app RSS idle with analysis off; the Mac app is lower at 214 MB. Audio: the app opens the output device at launch (coreaudiod shows an audio-out assertion for the app) and plays nothing.
+
+**To finish it.** Unlock the Mac (or keep the session unlocked), then `scripts/mac/r140-soak.sh` on `mbp` (3 scroll + analysis launches, 3 expand launches, one 25 minute soak, then the summary table). `r140-soak.py` refuses to run the page-driven kinds while the screen is locked. A 50k fixture needs `scripts/perf.sh --size 50k` there first (cargo is not on the Mac's default PATH).
+
+## WebKit memory split by soak action (2026-11-24, `webkit-mem-night`)
+
+**Question.** After the R140 25 min soak loop the WebKit web process kept 1.5 GB RSS / 4.4 GB footprint. Cache or leak, and which action?
+
+**Method.** Same app build and scratch-HOME runner as R140 (`~/dev/build/fourfour-r140`, 10k fixture, nothing rebuilt or installed). `scripts/mac/r140-soak.py` gained `--soak-actions` (one probe soak action per run), `--pressure-after` (`memory_pressure -S -l warn -s 30` in the idle tail, no sudo needed) and `--footprint-secs` with per-process footprint. `scripts/mac/webkit-mem-split.sh` runs each of the 7 soak actions alone: 7 min loop, then 6 min idle with the pressure nudge at +4 min. Footprint = `footprint` summed over the WebKit processes started after launch (WebContent + GPU + Networking). `mbp` on AC, unlocked, Merlin's app not running, protected paths unchanged in all 8 runs.
+
+| Action (7 min) | Cycles | WebKit footprint MB start / end / max | Growth MB/min | After 4 min idle | After pressure | Verdict |
+|---|---:|---|---:|---:|---:|---|
+| fling (scroll) | 820 | 540 / 502 / 540 | -3 | 218 | 218 | cache, released |
+| search | 479 | 901 / 1,878 / 1,900 | +100 | 1,676 | n/a (other app) | leak candidate, about 2 MB per search |
+| **palette** | 806 of ~1,450 | 148 / - / 16,552 | **+4,000** | WebContent killed at 4.5 min | - | **leak**, about 20 MB per open/close |
+| playlists | 84 | 149 / 140 / 149 | -2 | n/a (other app) | n/a | flat |
+| loadAndSeek | 437 | 345 / 531 / 531 | +28 | 356 | 356 | cache, released |
+| settings | 486 | 468 / 470 / 470 | -1 | 280 | n/a (other app) | flat, released |
+| analysis view | 1,585 | 371 / 358 / 386 | -2 | 162 | 162 | flat, released |
+
+**Palette, per process (3 min rerun, 607 cycles, footprint every 10 s).** Only WebContent grows: 126 MB → 13,312 MB in 3 min (about 4.3 GB/min, 22 MB per cycle), then flat for the 2 min idle tail. GPU stays 40-190 MB, Networking 7 MB, the app process 80-110 MB. WebContent RSS stays near 260-280 MB, so the growth is dirty memory pushed to the compressor/swap, which `footprint` counts and RSS does not. In the 7 min run WebContent reached about 16.5 GB footprint at 4.5 min and was killed; the page went blank and the probe never finished. No JS errors in `app.out`.
+
+**Pressure nudge.** The simulated warn level released nothing in any run; memory that idle did not give back stayed.
+
+**Measurement caveat.** In the search, playlists and settings tails 2 extra WebContent processes (+1.1-1.5 GB) appeared between 8 s and 4 min after the loop ended, with nothing running in our page. Other apps on the Mac run WebContent processes and the runner counts any WebKit process started after launch, so these are almost certainly not ours; those tail values are marked n/a. Last night's 25 min figure (1.5 GB RSS) may include the same kind of foreign process, while its 4.4 GB footprint fits the palette leak (the 7-action loop opens the palette about once every 7 actions).
+
+**Verdict.** Leak, not cache: the **command palette** (Ctrl+K, type "set", Escape) leaks about 20 MB of WebContent memory per open/close and never gives it back; at soak speed that is about 4 GB/min, and it explains the R140 footprint. **Search** is a smaller leak candidate (about 100 MB/min while typing, only 10% back after 4 min idle). Scroll, track load/seek, playlists, settings and the analysis view hold or release their memory. Next: a heap snapshot around palette open/close in `app/src/modules/CommandPalette.svelte` (candidates: the result lists built from `library.tracks` / `filterTracks` per keystroke, `loadAppSettings()` on every open; its window listeners and ResizeObserver are cleaned up) and the same for the header search.
+
+Raw: `~/dev/build/fourfour-r140/results/wk-*/run.json` on `mbp` (`wk-palette2` has per-process footprints).
+
+## Palette leak root cause (2026-11-25, `palette-leak`)
+
+**Question.** Why does each command palette open/type/Escape cycle keep about 20 MB in the WebKit WebContent process (`webkit-mem-night`)?
+
+**Method.** Build clone `~/dev/build/fourfour-r140` on `mbp` (AC, unlocked), scratch HOME, 10k fixture. The probe gained a `steps` soak action (scripted keys, typing, waits and `eval` snippets from `--soak-steps`), `--probe-extra` and canvas/img/animation counts per sample. Each variant: 1 min loop, WebContent footprint every 5 s, 20 s idle. MB/cycle = WebContent footprint growth over the loop / cycles.
+
+| Variant (1 min) | Cycles | MB/cycle | What changes per cycle |
+|---|---:|---:|---|
+| original `palette` action | 207 | 17.7 | palette opens, list filtered by "set", cleared |
+| open + Escape, no typing | 226 | 0.3 | palette only |
+| type `>set` (commands only) | 181 | 0.5 | palette rows change, track list does not |
+| type "set", then clear | 182 | 21.9 | list: full 10k ↔ filtered |
+| type "zzqxjv" (no match), then clear | 181 | 25.9 | list: full ↔ empty |
+| type "smoke", then clear | 181 | 22.3 | list: full ↔ filtered |
+| type "e" (matches every track), then clear | 190 | 0.5 | list unchanged |
+| "set" held, palette reopened | 225 | 0.4 | list stays filtered |
+| "set" ↔ "sett" | 117 | 0.5 | filtered ↔ filtered, both short |
+| no-match variant, row waveforms off (experiment build) | 54 | about 9 (run cut short) | rows without canvases |
+| no-match variant, row pool kept mounted (experiment build) | 186 | 21.6 | no row remount |
+| `eval`: 49 canvases created, drawn, removed | 208 | 0.2 | WebKit canvas churn only |
+| `eval`: 49 divs with the row cover blob URLs, removed | 225 | 0.0 | cover images only |
+| `eval`: table body height to 0 and back, no filter, no palette | 200 | **28.0** | only the scroll content height |
+| `eval`: table body height to half and back | 197 | 0.3 | tall ↔ tall |
+| `eval`: table body height to 2000 px and back | 200 | **39.4** | tall ↔ short |
+
+**Root cause.** Not the palette and not app JS: WebKit leaks WebContent memory each time the track table's scroll content (`.ff-table__body`, height = rows × row height, about 280,000 px for 10k tracks) switches between tall and short on the same element. Tall ↔ tall is flat; tall ↔ short leaks 28-40 MB per round trip, with nothing else changing. The palette hits it because typing a query that narrows All Tracks to few or no rows and then clearing it shrinks and regrows that element (the palette types into the shared list filter). Most likely WebKit swaps the scrolled layer between tiled and untiled backing at a size threshold and does not free the old backing; this is inferred from the tall/short split, not seen in a WebKit trace.
+
+**Search.** Same path in principle (header search drives the same list filter), but only proven for the palette: the search soak's about 2 MB per search is far below one tall ↔ short round trip, so its queries probably keep the list tall most of the time. Not rerun.
+
+**Fix.** Not done: every in-place candidate changes layout or behaviour (keep the body tall when empty = an empty scroll range; recreate the scroll container on the tall/short switch = scroll position and focus reset; hide the scroller while empty = a different empty-state structure), and none was tested. Next step is one `eval` test per candidate with the `steps` action before any app change.
+
+Raw: `~/dev/build/fourfour-r140/results/pl-*/run.json` on `mbp`; experiment switches on branch `pl-exp` (not for merge).
+
+## R140 Mac soak, full run (2026-11-24, `r140-soak-night`)
+
+**Status: done.** `mbp` unlocked and on AC, Merlin's fourfour.app not running. App built from this branch (app code identical to master = installed build 2148, `--features coreml`, bundled int8 weights) in the build clone `~/dev/build/fourfour-r140`, own cargo target, never installed. Every launch used a scratch HOME under that folder; the protected paths were unchanged after all 7 runs. Fixture: the Mac's `~/.cache/ff-fixture/10k` had lost its library and all but 200 music files (no ffmpeg there to regenerate), so the 10k library was rebuilt with `bench_startup fixture-lib` from 50 hard-linked copies of those 200 files (70% analysed, seed 4404). Rows, tags and covers repeat every 200 tracks; numbers are comparable to each other, not exactly to the original fixture.
+
+| Scenario (3 runs, end / max) | App RSS MB | WebKit RSS MB | App CPU % | WebKit CPU % | Frames |
+|---|---:|---:|---:|---:|---|
+| Open, 30 s idle | 192-196 | 170-178 | 0 (one 4) | 0 | - |
+| Scripted scroll, 45 s | 200-210 / 222 | 557-569 | 47 | 59-60 | 2,700 frames, 0-1 dropped, p95 18 ms, max 22-26 ms |
+| Analysis, 60 s (136-181 tracks) | 1,594-1,787 / 2,546 | 703-837 | 1,073-1,097 | 10-12 | scroll during analysis: 3-11 of 51-58 dropped, p95 19-33 ms, max 46-178 ms |
+| Idle 108 s after analysis | 1,242-1,601 | 714-835 | 0-1 | 0 | - |
+| Expand + 60 s expanded idle | 176-180 / 197 | 190-214 | 1 | 3 | - |
+| Soak loop 25 min (1 run) | 591 / 686 | 1,511 / 2,074 | 26 | 21 | footprint WebKit 4,598 MB max |
+| Idle 108 s after soak | 568 | 1,508 | 0 | 1 | footprint app 385, WebKit 4,368 MB |
+
+**Compared with earlier numbers.** Open idle 192-196 MB app RSS against 214 MB in the blocked R140 pilot (build 1314) and 277 MB on Linux (R42, analysis off). Analysis leaves 1.2-1.6 GB resident after 60 s, the same pattern as R42 finding 1 (2.1-2.3 GB on Linux after the whole queue). The app under the 25 min loop (591 MB) is the same order as R42's 584 MB. Idle is silent (0-1% CPU), expanded idle costs 1% app plus 3% WebKit.
+
+**Finding.** WebKit does not give memory back after the soak loop: 1.5 GB RSS and 4.4 GB footprint 108 s after the loop ended, against 170 MB at open. R42 saw the Linux web process at 650-1,150 MB under the loop. Not a verdict on a leak (one run, no longer idle tail); a longer idle tail after the loop, or the loop split by action as in R42, would tell cache from leak.
+
+**Verdict:** scroll and idle are smooth and silent on the Mac; analysis memory matches R42; the WebKit footprint after a 25 min soak (4.4 GB) is the one number to follow up.
+
+Raw: `~/dev/build/fourfour-r140/results/` on `mbp` (`summary.md`, per run `marks.jsonl`, `app.out`); the build 1314 pilot is in `results-1314/`.
+
 ## Mac night 3 (prepared 2026-11-05, `r125-mac-night3`, not run)
 
 One entry runs every pending automatic Mac check and writes one summary. Nothing in it needs a click. Every app launch uses `HOME` inside the night directory with a copy of the 10k fixture library; the app is built into the night directory and never installed to `/Applications`. Before the first launch the script refuses any scratch path outside `build/mac/night3-<date>/` or pointing at Application Support, `~/Library/Pioneer` or rekordbox, and checks the library path in the scratch `config.json`. The real `Pioneer`, `com.pioneer.test-ui` and rekordbox folders are hashed (find and stat, read only) before and after; a change fails the run.
