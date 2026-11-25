@@ -911,3 +911,5 @@
 2026-11-25 06:08 orchestrator Merlin reviewed stick-ui-r4: keep-updated header reads as two columns, still not intuitive; chose Fable explores 3 concepts. Q75 spawn: fable medium, $12 cap, branch stick-ui-r5
 2026-11-25 06:08 orchestrator FF-GOLDEN check: INTENSO holds a fourfour export from 11-23 (manifest), no Rekordbox golden export yet
 2026-11-25 06:12 orchestrator Q74 ci-cleanup green: run 45552645599 all 5 jobs success (linux, windows, macos, notices, webkit). Merge to master waits on Merlin
+2026-11-25 06:29 orchestrator Q74 landed: ci-cleanup merged to master, cargo test 946 pass 0 fail, pushed master 7a85ca8 per Merlin "1" (merge + push go)
+2026-11-25 06:29 orchestrator Q73b spawn: palette leak fix, option 1 remount scroll container on tall/short switch (Merlin "go with your recs for the leak"); opus medium, $8 cap, branch palette-leak-fix
