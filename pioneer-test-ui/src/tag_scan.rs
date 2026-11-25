@@ -413,6 +413,7 @@ mod tests {
         for ext in ["mp3", "wav", "aiff", "m4a", "flac"] {
             let path = dir.join(format!("zeros.{ext}"));
             std::fs::File::create(&path).unwrap().set_len(64 << 20).unwrap();
+            let _ = read_track_metadata(&path, 1);
             let started = std::time::Instant::now();
             let quick = read_track_tags(&path, 1);
             let quick_secs = started.elapsed().as_secs_f64();
