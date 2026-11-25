@@ -932,3 +932,5 @@
 2026-11-25 13:23 orchestrator Q73c spawn: leak fix 20-min Mac check (plf-batch.sh), sonnet low, $2 cap, branch palette-leak-check
 2026-11-25 13:47 orch-worker Q79 cost: $6.8294 (fable) — RESULT: head `04aaf48` on `stick-setup`, card `stick-setup` (open, confirmed in the hub list). ✅ **Done** - Setup dialog redesigned: stick left, playlists right [branch stick-setup]
 2026-11-25 13:48 orchestrator Q79 stick-setup done [04aaf48] ($6.83): setup dialog split layout + new copy, fixed NaN size bug (won't fit never triggered); smoke 230 pass; card stick-setup open (2 picks). Q80 spawn: Mac tests + DMG of stick-setup, sonnet medium, $4 cap, branch stick-setup-mac
+2026-11-25 13:48 orch-worker Q73c cost: $0.1915 (sonnet) — ✅ **Done** - RESULT: head `a1070d2` on `palette-leak-check`. The Mac batch finished and the numbers are in `perf-run-2026-11.md`. - Verdict: **the fix holds ove [branch palette-leak-check]
+2026-11-25 13:48 orchestrator Q73c leak check done [a1070d2] ($0.19): fix flat over 5 min (palette -0.07, search -0.55 MB/cycle); but master palette did not leak in this batch (3140 cycles flat), so no fresh before; earlier 19.4->3.5 stands; search never leaked

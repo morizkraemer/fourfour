@@ -42,7 +42,7 @@ AGENTS.md ## Unattended (autonomy tight). No Tauri windows, audio output or USB 
 47. Energy 1-10 (off): vs DEAM Spearman 0.58 (electronic 0.65). rec: keep off until a UI need - branch: truth-eval
 50. Playback wakeups (r123) untested on a device. rec: listen on the Mac, then land - branch: r123-idle-cpu 491ffcb
 52. Real-app Mac soak (r140) needs the Mac ~1 h on power. rec: one evening - branch: r140-mac-soak 9d53fae
-53. WebKit leak fixed on branch palette-leak-fix 01c1dd1: palette 19.4 -> 3.5 MB/cycle, flat in 1 min. rec: run plf-batch.sh (~20 min) when the Mac is idle tonight, then merge - branch: palette-leak-fix
+53. WebKit leak fix (branch palette-leak-fix 01c1dd1, check a1070d2): flat over 5 min on the Mac; caveat: master did not reproduce the leak in the night batch (earlier 19.4 -> 3.5 MB/cycle stands). rec: merge to master - branch: palette-leak-fix
 5. Old stash@{0} (waveform tweaks, prototyping only). rec: drop or branch - branch: none
 
 ### Needs Merlin at the Mac
