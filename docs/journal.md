@@ -916,3 +916,5 @@
 2026-11-25 06:32 orch-worker Q75 cost: $7.4950 (fable) — RESULT: head `13ac5ff` on `stick-ui-r5`, card `stick-ui-r5` (open, confirmed in the hub list). ✅ **Done** - 3 concepts built behind `?exp=stick-keep:a|b|c` - Ca [branch stick-ui-r5]
 2026-11-25 06:32 orchestrator Q75 stick-ui-r5 done [13ac5ff] ($7.49): 3 keep-updated concepts behind ?exp=stick-keep:a|b|c, rec A two sections (Kept up to date / Copied once); card stick-ui-r5 open, 2 questions. Month $288/450
 2026-11-25 07:44 orchestrator Merlin on stick-ui-r5: not sure about sections, all 3 weird layout-wise, redo whole thing with Fable. Q76 spawn: stick-ui-r6 whole stick layout redesign, fable medium, $14 cap
+2026-11-25 08:01 orch-worker Q76 cost: $6.4074 (fable) — RESULT: head `36df77b` on `stick-ui-r6`, card `stick-ui-r6` (open, confirmed on the hub). ✅ **Done** - Model: everything on a stick follows the library; rows on [branch stick-ui-r6]
+2026-11-25 08:02 orchestrator Q76 stick-ui-r6 done [36df77b] ($6.41): model = everything on a stick follows the library, rows show only exceptions; layouts ?exp=stick-layout:1|2, rec 2 split + right-click Pause updates; card stick-ui-r6 open. Month $307/450
