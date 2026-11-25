@@ -216,6 +216,7 @@
         } else if (op === 'focusHeader') document.querySelector('.ff-gheader__search input')?.focus();
         else if (op === 'blur') document.activeElement?.blur?.();
         else if (op === 'sleep') await sleep(a);
+        else if (op === 'eval') await new Function('frame', 'sleep', a)(frame, sleep);
         else if (op === 'wait') {
           if (!(await waitFor(() => document.querySelector(a), 3000))) throw new Error(`no ${a}`);
         } else if (op === 'gone') await waitFor(() => !document.querySelector(a), 3000);
