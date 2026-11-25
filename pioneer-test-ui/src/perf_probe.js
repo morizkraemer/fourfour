@@ -204,6 +204,25 @@
       await waitFor(() => !document.querySelector('.ff-cp'), 3000);
     },
 
+    async steps() {
+      for (const [op, a, b, extra] of cfg.soakSteps || []) {
+        if (op === 'key') pressKey(a, b, extra || {});
+        else if (op === 'type') {
+          const input = document.activeElement;
+          if (input instanceof HTMLInputElement) setInputValue(input, a);
+        } else if (op === 'header') {
+          const search = document.querySelector('.ff-gheader__search input');
+          if (search) setInputValue(search, a);
+        } else if (op === 'focusHeader') document.querySelector('.ff-gheader__search input')?.focus();
+        else if (op === 'blur') document.activeElement?.blur?.();
+        else if (op === 'sleep') await sleep(a);
+        else if (op === 'wait') {
+          if (!(await waitFor(() => document.querySelector(a), 3000))) throw new Error(`no ${a}`);
+        } else if (op === 'gone') await waitFor(() => !document.querySelector(a), 3000);
+        else throw new Error(`unknown step ${op}`);
+      }
+    },
+
     async playlists() {
       const rows = [...document.querySelectorAll('[data-drop-track-playlist-id]')].slice(0, 4);
       for (const row of rows) {
@@ -279,6 +298,9 @@
         cycle,
         js_heap_mb: performance.memory ? performance.memory.usedJSHeapSize / 1e6 : null,
         dom_nodes: document.getElementsByTagName('*').length,
+        imgs: document.images.length,
+        canvases: document.getElementsByTagName('canvas').length,
+        animations: document.getAnimations ? document.getAnimations().length : null,
         failures: { ...failures },
       });
     send('soak_start', { actions: names, minutes: cfg.soakMinutes, js_heap_api: Boolean(performance.memory) });
