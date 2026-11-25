@@ -910,3 +910,4 @@
 2026-11-25 06:08 orchestrator decided: genre paused (Merlin "genre pause it its fine"); branches genre-r2-data, genre-r2-beatfeat kept, off
 2026-11-25 06:08 orchestrator Merlin reviewed stick-ui-r4: keep-updated header reads as two columns, still not intuitive; chose Fable explores 3 concepts. Q75 spawn: fable medium, $12 cap, branch stick-ui-r5
 2026-11-25 06:08 orchestrator FF-GOLDEN check: INTENSO holds a fourfour export from 11-23 (manifest), no Rekordbox golden export yet
+2026-11-25 06:12 orchestrator Q74 ci-cleanup green: run 45552645599 all 5 jobs success (linux, windows, macos, notices, webkit). Merge to master waits on Merlin

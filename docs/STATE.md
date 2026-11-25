@@ -52,7 +52,7 @@ AGENTS.md ## Unattended (autonomy tight). No Tauri windows, audio output or USB 
 ## Queue
 ### Genre [paused 2026-11-25 per Merlin] - r2: data is the limit; branches genre-r2-data, genre-r2-beatfeat kept
 ### Q75 Stick UI round 5 [running] [box] - Fable $12: 3 keep-updated concepts; card stick-ui-r5
-### Q74 CI cleanup [running] [box] - branch ci-cleanup pushed, CI rerun; then Merlin OKs merge to master
+### Q74 CI cleanup [green, waiting] [box] - branch ci-cleanup, CI run 45552645599 all 5 jobs pass; merge + push master on Merlin OK
 ### Q63 Writer v2 [in master, off] - next: FF-GOLDEN byte diff (slice 4), then Mo's CDJ-3000 check, then make it default
 ### Q8 Cross-platform CI [waiting, 15]
 ### Later
