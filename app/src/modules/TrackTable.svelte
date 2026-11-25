@@ -322,6 +322,29 @@
   let booting = $derived(currentTracks.length === 0 && bootRows !== null);
   let shownTracks = $derived(booting ? bootRows : currentTracks);
 
+  const WEBKIT_UNTILED_LAYER_MAX_PX = 2000;
+  let tallScrollContent = $derived((spacerHeight(shownTracks.length) ?? 0) > WEBKIT_UNTILED_LAYER_MAX_PX);
+  let lastTallScrollContent = untrack(() => tallScrollContent);
+  let refocusBodyAfterRemount = false;
+
+  $effect.pre(() => {
+    const tall = tallScrollContent;
+    if (tall === lastTallScrollContent) return;
+    lastTallScrollContent = tall;
+    untrack(() => {
+      refocusBodyAfterRemount = tableScrollEl?.contains(document.activeElement) ?? false;
+      scrollTop = 0;
+      ownScrollTop = null;
+      lastScrollSample = { t: 0, top: 0 };
+    });
+  });
+
+  $effect(() => {
+    if (!tableBodyEl || !refocusBodyAfterRemount) return;
+    refocusBodyAfterRemount = false;
+    tableBodyEl.focus({ preventScroll: true });
+  });
+
   const BOOT_SNAPSHOT_IDLE_MS = 1500;
   let bootSnapshotTimer;
   $effect(() => {
@@ -897,6 +920,7 @@
       </EmptyState>
     </div>
   {:else}
+    {#key tallScrollContent}
     <div
       class="ff-table__scroll"
       class:ff-table__scroll--dragging={dragging && embedded}
@@ -1009,6 +1033,7 @@
       {/if}
       </div>
     </div>
+    {/key}
   {/if}
 </div>
 
