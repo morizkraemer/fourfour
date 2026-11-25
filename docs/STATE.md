@@ -42,7 +42,7 @@ AGENTS.md ## Unattended (autonomy tight). No Tauri windows, audio output or USB 
 47. Energy 1-10 (off): vs DEAM Spearman 0.58 (electronic 0.65). rec: keep off until a UI need - branch: truth-eval
 50. Playback wakeups (r123) untested on a device. rec: listen on the Mac, then land - branch: r123-idle-cpu 491ffcb
 52. Real-app Mac soak (r140) needs the Mac ~1 h on power. rec: one evening - branch: r140-mac-soak 9d53fae
-53. WebKit leak: cause found (Q73, branch palette-leak 4fbc075): the track table leaks 28-40 MB each time it switches between very tall and short (palette filter triggers it). rec: rebuild the scroll container on that switch (scroll and focus reset then) - branch: palette-leak
+53. WebKit leak fixed on branch palette-leak-fix 01c1dd1: palette 19.4 -> 3.5 MB/cycle, flat in 1 min. rec: run plf-batch.sh (~20 min) when the Mac is idle tonight, then merge - branch: palette-leak-fix
 5. Old stash@{0} (waveform tweaks, prototyping only). rec: drop or branch - branch: none
 
 ### Needs Merlin at the Mac
