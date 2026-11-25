@@ -903,3 +903,5 @@
 2026-11-25 04:30 orchestrator Q74 spawn: CI cleanup (PM relay of Merlin 11-24 "for the ci stuff go all your recs yes"): all 5 master jobs red 11-23; sonnet medium, $6 cap, branch ci-cleanup
 2026-11-25 04:45 orch-worker Q74 cost: $1.0675 (sonnet) — ✅ **Done** - Local fixes committed on `ci-cleanup`, head `b6ff1a5`. - Notices regenerated: drift was stale deps (rustix etc.). - Windows: 7 test failures fixed  [branch ci-cleanup]
 2026-11-25 04:45 orchestrator Q74 ci-cleanup local fixes [b6ff1a5] ($1.07): notices regen, 7 Windows path test fixes, tag_scan timing warm-up, 3 smoke races, webkit clipboard skip; worker push denied, orchestrator pushed branch, CI run 45548949499
+2026-11-25 05:18 orch-worker Q74b cost: $1.5602 (sonnet) — ✅ **Done** (committed, not pushed). Head `1ccd438`. - Notices: my first file was made before `npm ci`, so `@tauri-apps/api` fell back to MIT. Regenerated with ` [branch ci-cleanup]
+2026-11-25 05:18 orchestrator Q74b ci-cleanup round 2 [1ccd438] ($1.56): notices script fix, Windows app-dir test, macOS timing test CI-safe; pushed branch, CI rerun
