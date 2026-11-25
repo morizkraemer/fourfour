@@ -924,3 +924,4 @@
 2026-11-25 08:43 orch-worker Q77 cost: $0.8938 (sonnet) — RESULT: ✅ **Done** - Head `cd00f66` on `stick-r6-test` (not pushed) - DMG: `/Users/merlinkraemer/dev/build/fourfour-mac/build/mac/dmg-20261125-1626/fourfour_0.1 [branch stick-r6-test]
 2026-11-25 08:43 orchestrator Q77 stick-r6-test done [cd00f66] ($0.89): layout 2 default, test DMG build 2242 on Mac (check-dmg failures=0), not installed
 2026-11-25 09:17 orchestrator installed build 2242 (stick-r6-test cd00f66) in /Applications on Merlin's go; self-check ok
+2026-11-25 09:31 orchestrator Merlin: build 2242 works great; keep plug-in auto-sync with guards; fresh stick gets a setup prompt, new playlist on a stick asks first. Q78 spawn: stick-asks, sonnet high, $7 cap
