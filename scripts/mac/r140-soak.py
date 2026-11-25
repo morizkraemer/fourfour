@@ -153,6 +153,8 @@ def probe_for(kind, args):
             base["soakActions"] = args.soak_actions.split(",")
         if args.soak_steps:
             base["soakSteps"] = json.loads(args.soak_steps)
+    if args.probe_extra:
+        base.update(json.loads(args.probe_extra))
     return base
 
 
@@ -358,6 +360,7 @@ def main():
     r.add_argument("--soak-minutes", type=float, default=25)
     r.add_argument("--soak-actions", default="")
     r.add_argument("--soak-steps", default="")
+    r.add_argument("--probe-extra", default="")
     r.add_argument("--footprint-secs", type=float, default=30)
     r.add_argument("--pressure-after", type=float, default=0)
     r.add_argument("--max-seconds", type=float, default=3600)
