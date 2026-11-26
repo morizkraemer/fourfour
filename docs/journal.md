@@ -937,3 +937,4 @@
 2026-11-25 14:04 orch-worker Q80 cost: $0.4143 (sonnet) — ⏳ **Running** - The Mac has head 96025e1 and `cargo test --workspace` is running - DMG build and check-dmg follow automatically - Log on the Mac: `~/dev/build/s [branch stick-setup-mac]
 2026-11-25 14:09 orchestrator Q80 stick-setup Mac done ($0.41): Mac cargo test 946 pass 0 fail; DMG build 2259 dmg-20261125-2206, check-dmg failures=0; not installed, unlanded for morning review
 2026-11-26 04:43 orchestrator Merlin on stick-setup: "now its a bit much". Q81 spawn: setup dialog trim, fable medium, $6 cap, branch stick-setup-r2
+2026-11-26 04:44 orchestrator landed: leak fix (palette-leak-check a1070d2) merged to master per Merlin "yes"; vitest 1169 pass, svelte-check 0, build ok; not pushed

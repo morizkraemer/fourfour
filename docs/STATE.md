@@ -43,7 +43,6 @@ AGENTS.md ## Unattended (autonomy tight). No Tauri windows, audio output or USB 
 50. Playback wakeups (r123) untested on a device. rec: listen on the Mac, then land - branch: r123-idle-cpu 491ffcb
 52. Real-app Mac soak (r140) needs the Mac ~1 h on power. rec: one evening - branch: r140-mac-soak 9d53fae
 54. Stick setup (branch stick-setup 04aaf48, card stick-setup): split layout + new copy; Mac tests 946/0, DMG build 2259 ready (~/dev/build/fourfour-mac/build/mac/dmg-20261125-2206), not installed. rec: pick on the card, then install to try
-53. WebKit leak fix (branch palette-leak-fix 01c1dd1, check a1070d2): flat over 5 min on the Mac; caveat: master did not reproduce the leak in the night batch (earlier 19.4 -> 3.5 MB/cycle stands). rec: merge to master - branch: palette-leak-fix
 5. Old stash@{0} (waveform tweaks, prototyping only). rec: drop or branch - branch: none
 
 ### Needs Merlin at the Mac
