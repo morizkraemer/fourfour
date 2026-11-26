@@ -24,3 +24,9 @@ export function focusRegion(step: 1 | -1, root: ParentNode = document) {
     }
   }
 }
+
+export function focusRegionEntry(region: HTMLElement | null): boolean {
+  const target = region?.isConnected ? entryPoint(region) : undefined;
+  target?.focus();
+  return target !== undefined;
+}

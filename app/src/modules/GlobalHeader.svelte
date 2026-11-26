@@ -14,6 +14,7 @@
   import { ui, clearListFilter, setSearchText, openPalette } from '../stores/ui.svelte.ts';
   import { statusOfStick, toggleStickProblem } from '../stores/stick-sync.svelte.ts';
   import { showStickInfo } from '../shortcuts/navigation.ts';
+  import { focusRegionEntry } from '../shortcuts/focus-regions.ts';
   import { searchModeForColumn } from '../lib/searchLayout.ts';
   import SearchIconButton from './SearchIconButton.svelte';
   import LazyMount from '../lib/LazyMount.svelte';
@@ -45,6 +46,12 @@
   let searchEl = $state(null);
   let headerEl = $state(null);
   let returnFocusEl = null;
+  let returnFocusRegion = null;
+
+  function rememberReturnFocus(el) {
+    returnFocusEl = el;
+    returnFocusRegion = el instanceof Element ? el.closest('[data-focus-region]') : null;
+  }
 
   let activeTracks = $derived(tracksForSidebarSource(ui.activeSidebarRow));
   let filteredCount = $derived(filterTracks(activeTracks, ui.listFilter).length);
@@ -82,14 +89,14 @@
     if (!filterInputEl) return;
     if (ui.paletteOpen && !searchCollapsed) {
       if (document.activeElement !== filterInputEl) {
-        returnFocusEl = document.activeElement;
+        rememberReturnFocus(document.activeElement);
         filterInputEl.focus();
         filterInputEl.select();
       }
     } else if (document.activeElement === filterInputEl) {
       if (returnFocusEl?.isConnected && returnFocusEl !== document.body) returnFocusEl.focus();
-      else filterInputEl.blur();
-      returnFocusEl = null;
+      else if (!focusRegionEntry(returnFocusRegion)) filterInputEl.blur();
+      rememberReturnFocus(null);
     }
   });
 
@@ -113,7 +120,7 @@
 
   function onSearchFocusIn(e) {
     if (e.target !== filterInputEl || ui.paletteOpen) return;
-    returnFocusEl = e.relatedTarget;
+    rememberReturnFocus(e.relatedTarget);
     openPalette();
   }
 
